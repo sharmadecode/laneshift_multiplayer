@@ -1,0 +1,15 @@
+{
+  "name": "highway-rush",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @hr/client",
+    "build": "npm run build -w @hr/client",
+    "preview": "npm run preview -w @hr/client",
+    "typecheck": "npm run typecheck -w @hr/client"
+  }
+}
