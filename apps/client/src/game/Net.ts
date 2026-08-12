@@ -90,6 +90,18 @@ export class Net {
     return msg;
   }
 
+  /**
+   * Phase-lock input sends to the server tick schedule: a snapshot arrives
+   * ~RTT/2 after each server tick, so sending exactly one tick period after
+   * that lands each input in its own tick window. Without this, ~half of
+   * server ticks see two inputs and collapse one — the client's prediction
+   * then drifts from the authoritative trajectory and reconciliation fires
+   * visible corrections.
+   */
+  resync(now: number): void {
+    this.lastSend = now;
+  }
+
   disconnect(): void {
     this.socket?.disconnect();
     this.socket = null;

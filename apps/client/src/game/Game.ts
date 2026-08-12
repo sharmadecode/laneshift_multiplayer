@@ -87,9 +87,12 @@ export class Game {
   /** Maps the server's Date.now clock into this client's Date.now clock. */
   private serverClockOffsetMs: number | null = null;
   private serverCrashed = false;
+  /** A locally-detected crash awaiting server confirmation (do not un-crash yet). */
+  private localCrashPending = false;
 
   // --- client prediction: local car stepped on the server's 30 Hz grid ---
-  private latestInput: InputState = { steering: 0, throttle: 0, brake: 0 };
+  /** Input most recently ACCEPTED by the network layer (what the server has). */
+  private latestSentInput: InputState | null = null;
   private gridStepMs = 1000 / TICK_RATE;
   private gridAccum = 0;
   private prevGrid: VehicleState | null = null;
@@ -216,22 +219,22 @@ export class Game {
     const s = this.player.state;
 
     if (this.online && this.net) {
-      this.latestInput = input;
       const sent = this.net.sendInput({ steering: input.steering, throttle: input.throttle, brake: input.brake });
       if (sent) {
+        this.latestSentInput = sent;
         this.pendingInputs.push(sent);
         // A disconnected tab can otherwise retain an unbounded prediction queue.
         if (this.pendingInputs.length > 90) this.pendingInputs.shift();
       }
 
-      // Step the local car on the server's 30 Hz tick grid, applying the latest
-      // input per tick exactly like the server does. The server trajectory is
-      // then ours delayed by network latency — a constant offset, never a pull.
+      // Step the local car on the server's 30 Hz tick grid, applying the input
+      // the server actually has. Never an input that was only read locally —
+      // the server trajectory is then exactly ours delayed by latency.
       this.gridAccum += dt * 1000;
       while (this.gridAccum >= this.gridStepMs) {
         this.gridAccum -= this.gridStepMs;
         this.prevGrid = { ...s };
-        stepPlayer(s, this.latestInput, 1 / TICK_RATE);
+        stepPlayer(s, this.latestSentInput ?? input, 1 / TICK_RATE);
       }
 
       // Interpolate between the last two grid states for smooth 60 fps motion.
@@ -323,24 +326,24 @@ export class Game {
     this.snapHistory.push(snap);
     if (this.snapHistory.length > 40) this.snapHistory.shift();
     this.hud.setNet(`ONLINE \u00b7 ${snap.players.length}`, true);
+    // Anchor send cadence to snapshot arrival: ~1 input per server tick.
+    this.net?.resync(performance.now());
 
     const me = snap.players.find((p) => p.id === this.net?.playerId);
     if (!me) return;
 
     const s = this.player.state;
 
-    // Safety net: only a real network hiccup (dropped frames / tab hidden)
-    // puts us far from the server's view — ease back toward it. Normal play
-    // keeps us ~RTT ahead on the same tick grid, so this never triggers.
+    // Motion reconciliation: only a real divergence (dropped frames / tab
+    // hidden / input collapse) puts us far from the server's view. Crash and
+    // ghost flags are authoritative and applied separately below.
     this.pendingInputs = this.pendingInputs.filter((input) => input.seq > me.appliedSeq);
     const needsReconcile =
       // One server tick plus normal network latency is expected prediction
       // lead, not an error worth visibly correcting.
       Math.abs(s.x - me.x) > 1.25 ||
       Math.abs(s.speed - me.speed) > 5 ||
-      Math.abs(s.distance - me.distance) > 7 ||
-      s.crashed !== me.crashed ||
-      s.ghost !== me.ghost;
+      Math.abs(s.distance - me.distance) > 7;
 
     if (needsReconcile) {
       // Preserve the exact screen position, which may be between two fixed
@@ -350,10 +353,6 @@ export class Game {
       s.speed = me.speed;
       s.distance = me.distance;
       s.steering = me.steering;
-      s.crashed = me.crashed;
-      s.crashTimer = me.crashTimer;
-      s.ghost = me.ghost;
-      if (!s.ghost) s.ghostTimer = 0;
 
       for (const input of this.pendingInputs) stepPlayer(s, input, 1 / TICK_RATE);
       this.prevGrid = { ...s };
@@ -366,9 +365,17 @@ export class Game {
 
     // Authoritative flags apply immediately (crash, respawn, ghost).
     // ghostTimer is left to the local sim: both sides decrement it identically.
-    s.crashed = me.crashed;
-    s.crashTimer = me.crashTimer;
+    // A crash detected locally (client is ~RTT ahead) must not be un-crashed
+    // until the server has confirmed it, or the crash flickers on and off.
+    if (me.crashed) {
+      s.crashed = true;
+      s.crashTimer = me.crashTimer;
+      this.localCrashPending = false;
+    } else if (!this.localCrashPending) {
+      s.crashed = false;
+    }
     s.ghost = me.ghost;
+    if (!s.crashed && !s.ghost) s.ghostTimer = 0;
 
     // Re-anchor the grid phase to the server tick schedule so steps keep
     // landing on the same boundaries as the server's.
@@ -495,6 +502,7 @@ export class Game {
   }
 
   private onCrash(): void {
+    this.localCrashPending = true;
     crash(this.player.state);
     this.player.addShake();
     this.audio.crash();

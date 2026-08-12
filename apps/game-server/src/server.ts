@@ -25,11 +25,22 @@ function getOrCreateRoom(id: string): Room {
 // Phase 2: one shared room for everyone. Codes, lobbies and countdowns land in Phase 3.
 const DEFAULT_ROOM = getOrCreateRoom('rush');
 
-// Fixed 30 Hz simulation tick across all rooms.
+// Fixed 30 Hz simulation tick across all rooms, driven by a wall-clock
+// accumulator. Bare setInterval drifts on Windows: a 16 ms OS timer granularity
+// clamps a 33 ms interval to ~47 ms (~21 Hz), which slows the whole world and
+// drags snapshots down to ~15/s instead of the designed 20/s.
+const SIM_DT = 1 / TICK_RATE;
+let simAcc = 0;
+let simLast = performance.now();
 setInterval(() => {
-  const dt = 1 / TICK_RATE;
-  for (const room of rooms.values()) room.tick(dt);
-}, 1000 / TICK_RATE);
+  const now = performance.now();
+  simAcc += Math.min(0.25, (now - simLast) / 1000);
+  simLast = now;
+  while (simAcc >= SIM_DT) {
+    simAcc -= SIM_DT;
+    for (const room of rooms.values()) room.tick(SIM_DT);
+  }
+}, 5);
 
 function isValidInput(msg: unknown): msg is InputMsg {
   if (typeof msg !== 'object' || msg === null) return false;
