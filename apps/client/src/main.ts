@@ -2,7 +2,7 @@ import './style.css';
 import { Game } from './game/Game';
 import { initOrientationLock } from './game/Orientation';
 
-export const BUILD_TAG = 'build-o8-settings-design';
+export const BUILD_TAG = 'build-o10-multiplayer';
 
 console.log(`Highway Rush ${BUILD_TAG}`);
 

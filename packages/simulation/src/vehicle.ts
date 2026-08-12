@@ -21,7 +21,7 @@ export interface VehicleState {
   x: number; // lateral position (m, 0 = center lane)
   speed: number; // m/s (forward)
   distance: number; // meters driven
-  steering: -1 | 0 | 1;
+  steering: number; // smoothed steering (-1..1 float)
   crashed: boolean;
   crashTimer: number;
   ghost: boolean;

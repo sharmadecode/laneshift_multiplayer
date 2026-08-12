@@ -67,6 +67,25 @@ canvas {
   letter-spacing: 0.5px;
 }
 
+.net-chip {
+  align-self: flex-start;
+  margin-top: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: #ffb14d;
+  background: rgba(5, 6, 15, 0.55);
+  border: 1px solid rgba(255, 177, 77, 0.4);
+  border-radius: 8px;
+  padding: 3px 8px;
+}
+
+.net-chip.ok {
+  color: #4dd6ff;
+  border-color: rgba(77, 214, 255, 0.45);
+  box-shadow: 0 0 10px rgba(77, 214, 255, 0.25);
+}
+
 .hud-hint {
   position: absolute;
   bottom: max(10px, env(safe-area-inset-bottom));
@@ -434,6 +453,176 @@ canvas {
   font-size: 18px;
   font-weight: 600;
   opacity: 0.9;
+}
+
+/* ---------- Pause button ---------- */
+.pause-btn {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  right: calc(max(16px, env(safe-area-inset-right)) + 56px);
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  color: #e8eaf2;
+  font-size: 14px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.pause-btn:hover {
+  border-color: rgba(160, 195, 255, 0.55);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.38),
+    0 0 14px rgba(91, 140, 255, 0.4),
+    inset 0 1px 1px rgba(255, 255, 255, 0.38);
+}
+
+/* ---------- Menu overlays (start / pause) ---------- */
+.start-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at 50% 42%, rgba(10, 14, 32, 0.45) 0%, rgba(4, 5, 12, 0.82) 100%);
+  z-index: 40;
+  pointer-events: auto;
+}
+
+.start-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.game-title {
+  font-size: 44px;
+  font-weight: 900;
+  letter-spacing: 8px;
+  color: #f2f6ff;
+  text-shadow:
+    0 0 18px rgba(91, 140, 255, 0.85),
+    0 0 46px rgba(91, 140, 255, 0.5),
+    0 6px 24px rgba(0, 0, 0, 0.8);
+}
+
+.game-sub {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: rgba(190, 215, 255, 0.75);
+  margin-bottom: 26px;
+  text-shadow: 0 0 12px rgba(91, 140, 255, 0.6);
+}
+
+.menu-btn {
+  position: relative;
+  min-width: 210px;
+  padding: 14px 26px;
+  border-radius: 14px;
+  color: #f2f4fa;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 0.08s, box-shadow 0.08s, border-color 0.08s;
+}
+
+.menu-btn:hover {
+  border-color: rgba(190, 215, 255, 0.7);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.38),
+    0 0 22px rgba(91, 140, 255, 0.55),
+    inset 0 1px 1px rgba(255, 255, 255, 0.38);
+  transform: translateY(-1px);
+}
+
+.menu-btn:active {
+  transform: scale(0.96);
+}
+
+.start-btn {
+  animation: start-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes start-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 10px 30px rgba(0, 0, 0, 0.38),
+      0 0 16px rgba(91, 140, 255, 0.4),
+      inset 0 1px 1px rgba(255, 255, 255, 0.38);
+  }
+  50% {
+    box-shadow:
+      0 10px 30px rgba(0, 0, 0, 0.38),
+      0 0 34px rgba(91, 140, 255, 0.75),
+      inset 0 1px 1px rgba(255, 255, 255, 0.38);
+  }
+}
+
+.start-hint {
+  margin-top: 20px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  opacity: 0.45;
+}
+
+.pause-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 5, 12, 0.55);
+  z-index: 30;
+  pointer-events: auto;
+}
+
+.pause-overlay.hidden {
+  display: none;
+}
+
+.pause-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 26px 34px;
+  border-radius: 20px;
+  min-width: 240px;
+}
+
+.pause-dist {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #8fb8ff;
+  margin-bottom: 10px;
+  text-shadow: 0 0 14px rgba(91, 140, 255, 0.5);
+}
+
+/* ---------- FPS counter (debug: ?fps) ---------- */
+.fps-counter {
+  position: fixed;
+  bottom: 10px;
+  left: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #8fb8ff;
+  background: rgba(5, 6, 15, 0.6);
+  border: 1px solid rgba(91, 140, 255, 0.3);
+  border-radius: 8px;
+  padding: 4px 8px;
+  z-index: 50;
+  pointer-events: none;
 }
 
 /* ---------- Orientation lock ---------- */

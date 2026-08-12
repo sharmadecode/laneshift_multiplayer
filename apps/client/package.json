@@ -12,6 +12,7 @@
   "dependencies": {
     "@hr/shared": "*",
     "@hr/simulation": "*",
+    "socket.io-client": "^4.8.3",
     "three": "^0.170.0"
   },
   "devDependencies": {

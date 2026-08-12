@@ -17,18 +17,9 @@ import {
   laneCenterX,
   laneCoordinate
 } from '@hr/shared';
+import type { TrafficCar } from '@hr/shared';
 
-export interface TrafficCar {
-  id: number;
-  lane: number; // -1 | 0 | 1
-  x: number; // absolute lateral position (m), lane center + drift
-  roadDist: number; // absolute position on the road (meters)
-  speed: number; // m/s
-  length: number;
-  width: number;
-  modelIndex: number;
-  colorIndex: number;
-}
+export type { TrafficCar };
 
 /** Seeded PRNG (mulberry32) so traffic is deterministic when a seed is given. */
 export function mulberry32(seed: number): () => number {
@@ -68,11 +59,20 @@ export class TrafficSpawner {
     this.initialised = false;
   }
 
-  /** Advance the traffic simulation by dt seconds. playerDist = player road distance. */
-  update(playerDist: number, dt: number): void {
+  /**
+   * Advance the traffic simulation by dt seconds.
+   * Accepts one player distance (offline) or several (multiplayer): the spawn
+   * window follows the leading player, and cars despawn only when behind
+   * everyone — so every player in a room sees the exact same traffic.
+   */
+  update(playerDist: number | number[], dt: number): void {
+    const dists = Array.isArray(playerDist) ? playerDist : [playerDist];
+    const lead = Math.max(...dists);
+    const trail = Math.min(...dists);
+
     if (!this.initialised) {
       for (let l = 0; l < LANE_COUNT; l++) {
-        this.nextSpawn[l] = playerDist + TRAFFIC_AHEAD_WINDOW * 0.25 + this.rng() * TRAFFIC_AHEAD_WINDOW * 0.75;
+        this.nextSpawn[l] = lead + TRAFFIC_AHEAD_WINDOW * 0.25 + this.rng() * TRAFFIC_AHEAD_WINDOW * 0.75;
         this.spawnAhead(laneCoordinate(l));
       }
       this.initialised = true;
@@ -82,7 +82,7 @@ export class TrafficSpawner {
     for (let i = this.cars.length - 1; i >= 0; i--) {
       const c = this.cars[i];
       c.roadDist += c.speed * dt;
-      if (playerDist - c.roadDist > TRAFFIC_REAR_WINDOW) {
+      if (trail - c.roadDist > TRAFFIC_REAR_WINDOW) {
         this.cars.splice(i, 1);
       }
     }
@@ -105,18 +105,18 @@ export class TrafficSpawner {
       }
     }
 
-    // spawn more as the window advances; never spawn too close to the player
+    // spawn more as the window advances; never spawn too close to the leader
     // or behind the lane's frontmost car (which can catch up while the cap pauses spawning)
     for (let l = 0; l < LANE_COUNT; l++) {
       const lane = this.cars.filter((c) => c.lane === laneCoordinate(l));
       let frontmost = -Infinity;
       for (const c of lane) if (c.roadDist > frontmost) frontmost = c.roadDist;
       const minSpawn = Math.max(
-        playerDist + TRAFFIC_MIN_SPAWN_AHEAD,
+        lead + TRAFFIC_MIN_SPAWN_AHEAD,
         frontmost + TRAFFIC_FOLLOW_GAP + 2
       );
       if (this.nextSpawn[l] < minSpawn) this.nextSpawn[l] = minSpawn;
-      while (this.cars.length < TRAFFIC_MAX_COUNT && this.nextSpawn[l] - playerDist < TRAFFIC_AHEAD_WINDOW) {
+      while (this.cars.length < TRAFFIC_MAX_COUNT && this.nextSpawn[l] - lead < TRAFFIC_AHEAD_WINDOW) {
         this.spawnAhead(laneCoordinate(l));
       }
     }

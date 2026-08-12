@@ -8,8 +8,13 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @hr/client",
+    "dev:server": "npm run dev -w @hr/game-server",
+    "dev:all": "concurrently -k -n client,server -c cyan,yellow \"npm:dev\" \"npm:dev:server\"",
     "build": "npm run build -w @hr/client",
     "preview": "npm run preview -w @hr/client",
-    "typecheck": "npm run typecheck -w @hr/client"
+    "typecheck": "npm run typecheck -w @hr/client && npm run typecheck -w @hr/game-server"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.4"
   }
 }

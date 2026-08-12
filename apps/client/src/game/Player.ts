@@ -32,26 +32,30 @@ export class Player {
     stepPlayer(this.state, input, dt);
   }
 
-  syncVisuals(dt: number): void {
+  /** Optional interpolated values (online mode): smooth 60 fps motion between 30 Hz grid steps. */
+  syncVisuals(dt: number, r?: { x: number; speed: number; steering: number }): void {
     const s = this.state;
+    const rx = r?.x ?? s.x;
+    const rs = r?.speed ?? s.speed;
+    const rSteer = r?.steering ?? s.steering;
     const m = this.mesh;
-    m.position.x = s.x;
+    m.position.x = rx;
 
     if (s.crashed) {
       m.rotation.z += 5.5 * dt;
       m.rotation.y += 2.2 * dt;
       this.shake = 1;
     } else {
-      const f = s.speed / PLAYER_MAX_SPEED;
-      m.rotation.z = THREE.MathUtils.lerp(m.rotation.z, -s.steering * STEER_ROLL * (0.4 + f), 12 * dt);
-      m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, -s.steering * STEER_YAW * f, 10 * dt);
+      const f = rs / PLAYER_MAX_SPEED;
+      m.rotation.z = THREE.MathUtils.lerp(m.rotation.z, -rSteer * STEER_ROLL * (0.4 + f), 12 * dt);
+      m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, -rSteer * STEER_YAW * f, 10 * dt);
     }
 
-    const spin = (s.speed * dt) / 0.34;
+    const spin = (rs * dt) / 0.34;
     for (const w of m.userData.wheels as THREE.Object3D[]) w.rotation.x -= spin;
 
     // camera
-    const target = new THREE.Vector3(s.x * 0.82, 5.4, 9.2);
+    const target = new THREE.Vector3(rx * 0.82, 5.4, 9.2);
     const k = 1 - Math.pow(0.0005, dt);
     this.camPos.lerp(target, k);
     const sh = this.shake * this.shake * 0.9;
@@ -62,9 +66,9 @@ export class Player {
     );
     this.shake = Math.max(0, this.shake - dt * 2.2);
 
-    this.camera.lookAt(s.x * 0.75, 1.4, -40);
+    this.camera.lookAt(rx * 0.75, 1.4, -40);
 
-    const targetFov = this.baseFov + (s.speed / PLAYER_MAX_SPEED) * 14;
+    const targetFov = this.baseFov + (rs / PLAYER_MAX_SPEED) * 14;
     if (Math.abs(this.fov - targetFov) > 0.05) {
       this.fov = THREE.MathUtils.lerp(this.fov, targetFov, 4 * dt);
       this.camera.fov = this.fov;
@@ -79,5 +83,10 @@ export class Player {
   respawnVisual(): void {
     this.mesh.rotation.set(0, 0, 0);
     this.shake = 0;
+  }
+
+  reset(): void {
+    Object.assign(this.state, createVehicle());
+    this.respawnVisual();
   }
 }
