@@ -31,6 +31,8 @@ interface SnapshotSample {
   prev: WorldSnapshot;
   next: WorldSnapshot;
   t: number;
+  /** Seconds past the newest snapshot; forward-extrapolate render data. */
+  extrapDt?: number;
 }
 
 interface PresetCfg {
@@ -87,8 +89,6 @@ export class Game {
   /** Maps the server's Date.now clock into this client's Date.now clock. */
   private serverClockOffsetMs: number | null = null;
   private serverCrashed = false;
-  /** A locally-detected crash awaiting server confirmation (do not un-crash yet). */
-  private localCrashPending = false;
 
   // --- client prediction: local car stepped on the server's 30 Hz grid ---
   /** Input most recently ACCEPTED by the network layer (what the server has). */
@@ -271,7 +271,7 @@ export class Game {
 
     // ---- offline fallback ----
     this.player.update(input, dt);
-    this.spawner.update(s.distance, dt);
+    this.spawner.update([{ distance: s.distance, active: true }], dt);
 
     if (!s.crashed && !s.ghost) {
       playerHitsTraffic(s.x, this.spawner.cars, s.distance, () => this.onCrash());
@@ -365,15 +365,8 @@ export class Game {
 
     // Authoritative flags apply immediately (crash, respawn, ghost).
     // ghostTimer is left to the local sim: both sides decrement it identically.
-    // A crash detected locally (client is ~RTT ahead) must not be un-crashed
-    // until the server has confirmed it, or the crash flickers on and off.
-    if (me.crashed) {
-      s.crashed = true;
-      s.crashTimer = me.crashTimer;
-      this.localCrashPending = false;
-    } else if (!this.localCrashPending) {
-      s.crashed = false;
-    }
+    s.crashed = me.crashed;
+    s.crashTimer = me.crashTimer;
     s.ghost = me.ghost;
     if (!s.crashed && !s.ghost) s.ghostTimer = 0;
 
@@ -391,7 +384,7 @@ export class Game {
    * Traffic arrives at 20 Hz; interpolate between the last two snapshots so it
    * moves smoothly relative to the (60 fps) player instead of stuttering.
    */
-  private sampleSnapshots(delayMs = REMOTE_DELAY_MS): SnapshotSample | null {
+  private sampleSnapshots(delayMs = REMOTE_DELAY_MS, extrapolate = false): SnapshotSample | null {
     const history = this.snapHistory;
     if (!history.length || this.serverClockOffsetMs === null) return null;
     const renderTs = Date.now() - this.serverClockOffsetMs - delayMs;
@@ -409,13 +402,18 @@ export class Game {
       }
     }
     const last = history[history.length - 1];
+    if (extrapolate && renderTs > last.ts) {
+      return { prev: last, next: last, t: 0, extrapDt: (renderTs - last.ts) / 1000 };
+    }
     return { prev: last, next: last, t: 0 };
   }
 
   private renderTraffic(): TrafficCar[] {
-    const sample = this.sampleSnapshots();
+    // Render traffic in the local car's frame (delay 0, extrapolated past the
+    // newest snapshot): a server-confirmed crash must hit the car you can see.
+    const sample = this.sampleSnapshots(0, true);
     if (!sample) return [];
-    const { prev, next, t } = sample;
+    const { prev, next, t, extrapDt } = sample;
     const prevById = new Map<number, TrafficCar>();
     for (const c of prev.traffic) prevById.set(c.id, c);
     const out: TrafficCar[] = new Array(next.traffic.length);
@@ -424,19 +422,20 @@ export class Game {
       const p = prevById.get(c.id);
       if (!p) {
         out[i] = c;
-        continue;
+      } else {
+        out[i] = {
+          id: c.id,
+          lane: c.lane,
+          x: p.x + (c.x - p.x) * t,
+          roadDist: p.roadDist + (c.roadDist - p.roadDist) * t,
+          speed: p.speed + (c.speed - p.speed) * t,
+          length: c.length,
+          width: c.width,
+          modelIndex: c.modelIndex,
+          colorIndex: c.colorIndex
+        };
       }
-      out[i] = {
-        id: c.id,
-        lane: c.lane,
-        x: p.x + (c.x - p.x) * t,
-        roadDist: p.roadDist + (c.roadDist - p.roadDist) * t,
-        speed: p.speed + (c.speed - p.speed) * t,
-        length: c.length,
-        width: c.width,
-        modelIndex: c.modelIndex,
-        colorIndex: c.colorIndex
-      };
+      if (extrapDt) out[i].roadDist += out[i].speed * extrapDt;
     }
     return out;
   }
@@ -502,7 +501,6 @@ export class Game {
   }
 
   private onCrash(): void {
-    this.localCrashPending = true;
     crash(this.player.state);
     this.player.addShake();
     this.audio.crash();

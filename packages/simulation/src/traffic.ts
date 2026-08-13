@@ -7,13 +7,16 @@ import {
   TRAFFIC_BASE_GAP,
   TRAFFIC_GAP_JITTER,
   TRAFFIC_MAX_COUNT,
+  TRAFFIC_MAX_CARS,
   TRAFFIC_MIN_SPAWN_AHEAD,
   TRAFFIC_LANE_DRIFT,
   TRAFFIC_FOLLOW_GAP,
-  TRAFFIC_TAIL_SLOW,
+  TRAFFIC_PACK_NEAREST,
+  TRAFFIC_PACK_PER_LANE,
   TRAFFIC_REAR_WINDOW,
   TRAFFIC_SPEED_MAX,
   TRAFFIC_SPEED_MIN,
+  TRAFFIC_TAIL_SLOW,
   laneCenterX,
   laneCoordinate
 } from '@hr/shared';
@@ -45,6 +48,7 @@ export class TrafficSpawner {
   private rng: () => number;
   private density: number;
   private initialised = false;
+  private lastActiveCount = 1;
 
   constructor(opts: TrafficOptions = { density: 0.7 }) {
     this.rng = opts.seed !== undefined ? mulberry32(opts.seed) : Math.random;
@@ -57,32 +61,60 @@ export class TrafficSpawner {
     this.nextId = 1;
     this.nextSpawn = [];
     this.initialised = false;
+    this.lastActiveCount = 1;
+  }
+
+  /** Highest roadDist in the field (the traffic front). */
+  get front(): number {
+    let f = -Infinity;
+    for (const c of this.cars) if (c.roadDist > f) f = c.roadDist;
+    return f;
+  }
+
+  /** Soft cap: scales with the number of racers actually racing. */
+  private maxCars(): number {
+    return Math.min(TRAFFIC_MAX_COUNT + 12 * (this.lastActiveCount - 1), TRAFFIC_MAX_CARS);
   }
 
   /**
-   * Advance the traffic simulation by dt seconds.
-   * Accepts one player distance (offline) or several (multiplayer): the spawn
-   * window follows the leading player, and cars despawn only when behind
-   * everyone — so every player in a room sees the exact same traffic.
+   * Advance the traffic simulation by dt seconds. `racers` is every player in
+   * the room with their distance and activity state: the world follows the
+   * leading *active* racer, and cars despawn only behind the trailing active
+   * racer (an idle player must not pin the world). Every client sees the same
+   * cars because this single field is what snapshots carry.
    */
-  update(playerDist: number | number[], dt: number): void {
-    const dists = Array.isArray(playerDist) ? playerDist : [playerDist];
-    const lead = Math.max(...dists);
-    const trail = Math.min(...dists);
+  update(racers: Array<{ distance: number; active: boolean }>, dt: number): void {
+    if (!racers.length) return; // an empty room must never seed the world
+    const active = racers.filter((r) => r.active);
+    // No one racing (all parked): keep the world coherent off everyone's
+    // positions instead of letting -Infinity poison the spawn cursors.
+    const tracked = active.length ? active : racers;
+    let lead = -Infinity;
+    let trail = Infinity;
+    for (const r of tracked) {
+      if (r.distance > lead) lead = r.distance;
+      if (r.distance < trail) trail = r.distance;
+    }
+    this.lastActiveCount = Math.max(1, active.length);
 
     if (!this.initialised) {
       for (let l = 0; l < LANE_COUNT; l++) {
         this.nextSpawn[l] = lead + TRAFFIC_AHEAD_WINDOW * 0.25 + this.rng() * TRAFFIC_AHEAD_WINDOW * 0.75;
-        this.spawnAhead(laneCoordinate(l));
+        this.spawnAhead(l);
       }
       this.initialised = true;
     }
 
-    // move cars forward
+    // move cars forward; drop ones behind the trailing racer or stranded far
+    // ahead of the leading racer (debris from departed players, never legit:
+    // the refill keeps the front inside lead + window)
     for (let i = this.cars.length - 1; i >= 0; i--) {
       const c = this.cars[i];
       c.roadDist += c.speed * dt;
-      if (trail - c.roadDist > TRAFFIC_REAR_WINDOW) {
+      if (
+        trail - c.roadDist > TRAFFIC_REAR_WINDOW ||
+        c.roadDist - lead > TRAFFIC_AHEAD_WINDOW + 300
+      ) {
         this.cars.splice(i, 1);
       }
     }
@@ -116,8 +148,47 @@ export class TrafficSpawner {
         frontmost + TRAFFIC_FOLLOW_GAP + 2
       );
       if (this.nextSpawn[l] < minSpawn) this.nextSpawn[l] = minSpawn;
-      while (this.cars.length < TRAFFIC_MAX_COUNT && this.nextSpawn[l] - lead < TRAFFIC_AHEAD_WINDOW) {
-        this.spawnAhead(laneCoordinate(l));
+      while (this.cars.length < this.maxCars() && this.nextSpawn[l] - lead < TRAFFIC_AHEAD_WINDOW) {
+        this.spawnAhead(l);
+      }
+    }
+  }
+
+  /**
+   * Seed a personal pack of traffic ahead of a racer stranded behind the
+   * traffic front (late joiners, parked-then-go racers, slow starters).
+   * Lanes whose range [d+180, d+430] already holds cars are skipped, so a pack
+   * can never overlap existing traffic — when the packs merge, no new cars
+   * appear and the existing ones just flow together.
+   */
+  seedPack(distance: number): void {
+    const far = distance + TRAFFIC_AHEAD_WINDOW;
+    const start = distance + TRAFFIC_PACK_NEAREST;
+    for (let l = 0; l < LANE_COUNT; l++) {
+      // Only cars in the local window matter: the leader's cars far ahead
+      // must not block the stranded racer's seed.
+      let occupied = false;
+      for (const c of this.cars) {
+        if (
+          c.lane === laneCoordinate(l) &&
+          c.roadDist > start - TRAFFIC_FOLLOW_GAP - 10 &&
+          c.roadDist < far + TRAFFIC_FOLLOW_GAP
+        ) {
+          occupied = true;
+          break;
+        }
+      }
+      if (occupied) continue; // range occupied: merging packs never overlap
+      let pos = start;
+      let placed = 0;
+      while (
+        placed < TRAFFIC_PACK_PER_LANE &&
+        pos < far &&
+        this.cars.length < this.maxCars()
+      ) {
+        this.pushCar(l, pos);
+        pos += TRAFFIC_BASE_GAP * (0.9 + this.rng() * 0.4) * (1.2 - 0.4 * this.density);
+        placed++;
       }
     }
   }
@@ -134,14 +205,13 @@ export class TrafficSpawner {
     }
   }
 
-  private spawnAhead(lane: number): void {
-    const gap = (TRAFFIC_BASE_GAP + this.rng() * TRAFFIC_GAP_JITTER) * (1.2 - 0.4 * this.density);
-    const roadDist = this.nextSpawn[lane + 1];
+  /** Create a car at an explicit position (refill cursor or personal pack). */
+  private pushCar(laneIndex: number, roadDist: number): void {
     const speed = TRAFFIC_SPEED_MIN + this.rng() * (TRAFFIC_SPEED_MAX - TRAFFIC_SPEED_MIN);
     this.cars.push({
       id: this.nextId++,
-      lane,
-      x: laneCenterX(lane) + (this.rng() * 2 - 1) * TRAFFIC_LANE_DRIFT,
+      lane: laneCoordinate(laneIndex),
+      x: laneCenterX(laneCoordinate(laneIndex)) + (this.rng() * 2 - 1) * TRAFFIC_LANE_DRIFT,
       roadDist,
       speed,
       length: CAR_LENGTH * (0.95 + this.rng() * 0.15),
@@ -149,7 +219,14 @@ export class TrafficSpawner {
       modelIndex: Math.floor(this.rng() * 4),
       colorIndex: Math.floor(this.rng() * 8)
     });
-    this.nextSpawn[lane + 1] = roadDist + gap;
+  }
+
+  /** Spawn one car at the lane index's cursor; each lane advances its own cursor. */
+  private spawnAhead(laneIndex: number): void {
+    const gap = (TRAFFIC_BASE_GAP + this.rng() * TRAFFIC_GAP_JITTER) * (1.2 - 0.4 * this.density);
+    const roadDist = this.nextSpawn[laneIndex];
+    this.pushCar(laneIndex, roadDist);
+    this.nextSpawn[laneIndex] = roadDist + gap;
   }
 }
 

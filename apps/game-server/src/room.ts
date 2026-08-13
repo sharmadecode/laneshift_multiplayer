@@ -1,7 +1,15 @@
 import {
+  GHOST_TIME,
+  JOIN_BEHIND_TRAIL_M,
   NET_EVENTS,
+  PLAYER_ACTIVE_SPEED,
+  PLAYER_IDLE_GRACE,
+  PLAYER_IDLE_SPEED,
   SNAPSHOT_RATE,
+  START_SPEED,
   TICK_RATE,
+  TRAFFIC_PACK_COOLDOWN_MS,
+  TRAFFIC_PACK_STRANDED,
   type ClientInput,
   type InputMsg,
   type PlayerSnapshot,
@@ -27,6 +35,9 @@ interface ServerPlayer {
   input: ClientInput;
   receivedSeq: number; // latest seq received (not necessarily stepped yet)
   appliedSeq: number; // latest seq whose input the sim has actually stepped
+  active: boolean; // racing (or within the idle grace window)
+  inactiveFor: number; // seconds spent below PLAYER_IDLE_SPEED
+  lastPackSeed: number; // Date.now() of the last personal pack seed
 }
 
 /**
@@ -45,14 +56,29 @@ export class Room {
   ) {}
 
   addPlayer(id: string, name: string): ServerPlayer {
+    const state = createVehicle();
+    // Late joiners spawn behind the trailing racer, ghost-protected until
+    // they reach the pack (ghost = intangible; GHOST_TIME long enough to
+    // cover the gap but short enough to feel fair).
+    let trail = Infinity;
+    for (const p of this.players.values()) {
+      if (p.state.distance < trail) trail = p.state.distance;
+    }
+    state.distance = Math.max(0, (trail === Infinity ? 0 : trail) - JOIN_BEHIND_TRAIL_M);
+    state.speed = START_SPEED * 0.6;
+    state.ghost = true;
+    state.ghostTimer = GHOST_TIME;
     const p: ServerPlayer = {
       id,
       name,
-      state: createVehicle(),
+      state,
       input: { steering: 0, throttle: 0, brake: 0 },
       // Sequence zero is a valid first input, so use -1 until one is received.
       receivedSeq: -1,
-      appliedSeq: -1
+      appliedSeq: -1,
+      active: true,
+      inactiveFor: 0,
+      lastPackSeed: 0
     };
     this.players.set(id, p);
     this.broadcast(NET_EVENTS.playerJoin, this.toPlayerSnapshot(p));
@@ -61,6 +87,9 @@ export class Room {
 
   removePlayer(id: string): void {
     this.players.delete(id);
+    // An empty room has no world worth keeping: the next player gets a fresh,
+    // deterministic field (also a structural guard against stale debris).
+    if (!this.players.size) this.spawner.reset();
     this.broadcast(NET_EVENTS.playerLeave, { playerId: id });
   }
 
@@ -79,17 +108,43 @@ export class Room {
 
   tick(dt: number = DT): void {
     this.tickCount++;
+    if (!this.players.size) return; // no world state to keep while empty
 
-    const dists: number[] = [];
+    const racers: Array<{ distance: number; active: boolean }> = [];
     for (const p of this.players.values()) {
       stepPlayer(p.state, p.input, dt);
       // The snapshot state is stepped through the latest received input, so
       // echo that seq — clients replay only inputs beyond it (exact prediction).
       p.appliedSeq = p.receivedSeq;
-      dists.push(p.state.distance);
+      // Idle racers stop pinning the world: hysteresis keeps a brief stop
+      // (crash, lift-off) racing, and a parked player drops out after a few
+      // seconds so the leader's traffic keeps flowing.
+      if (p.state.speed > PLAYER_ACTIVE_SPEED) {
+        p.inactiveFor = 0;
+      } else if (p.state.speed > PLAYER_IDLE_SPEED) {
+        p.inactiveFor = Math.max(0, p.inactiveFor - dt); // creeping: recover slowly
+      } else {
+        p.inactiveFor += dt;
+      }
+      p.active = p.state.speed > PLAYER_ACTIVE_SPEED || p.inactiveFor < PLAYER_IDLE_GRACE;
+      racers.push({ distance: p.state.distance, active: p.active });
     }
 
-    this.spawner.update(dists, dt);
+    this.spawner.update(racers, dt);
+
+    // Personal packs: a racing player stranded behind the traffic front gets
+    // cars seeded around them (rate-limited) — this is what makes a parked
+    // player who throttles after 5 minutes meet traffic instantly, and what
+    // fills the road for mid-race joiners.
+    const front = this.spawner.front;
+    const now = Date.now();
+    for (const p of this.players.values()) {
+      if (!p.active) continue;
+      if (p.state.distance + TRAFFIC_PACK_STRANDED >= front) continue; // not stranded
+      if (now - p.lastPackSeed < TRAFFIC_PACK_COOLDOWN_MS) continue;
+      this.spawner.seedPack(p.state.distance);
+      p.lastPackSeed = now;
+    }
 
     for (const p of this.players.values()) {
       if (p.state.crashed || p.state.ghost) continue;

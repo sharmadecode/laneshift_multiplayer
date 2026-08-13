@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 import { PLAYER_MAX_SPEED } from '@hr/shared';
-import { crash, createVehicle, playerHitsTraffic, stepPlayer, type InputState, type TrafficCar } from '@hr/simulation';
+import { createVehicle, stepPlayer, type InputState } from '@hr/simulation';
 
 // Mirrors the client's grid-stepped prediction (Game.ts): the local car is
 // stepped only on the server's 30 Hz tick grid (phase-anchored to snapshots),
@@ -18,8 +18,6 @@ let lastSent: (InputState & { seq: number }) | null = null;
 let nextSeq = 0;
 const pendingInputs: Array<InputState & { seq: number }> = [];
 const visualCorrection = { x: 0, distance: 0 };
-let lastTraffic: TrafficCar[] = [];
-let localCrashPending = false;
 
 let lastRx = 0;
 let lastRd = 0;
@@ -30,6 +28,7 @@ let maxOffsetX = 0;
 let maxOffsetDist = 0;
 let safetyNetTriggers = 0;
 let snapshots = 0;
+let trackedPrev = false;
 
 sock.on('welcome', (w) => (myId = w.playerId));
 
@@ -63,18 +62,12 @@ sock.on('snap', (snap) => {
     visualCorrection.distance += oldDistance - sim.distance;
     safetyNetTriggers++;
   }
-  if (me.crashed) {
-    sim.crashed = true;
-    sim.crashTimer = me.crashTimer;
-    localCrashPending = false;
-  } else if (!localCrashPending) {
-    sim.crashed = false;
-  }
+  sim.crashed = me.crashed;
+  sim.crashTimer = me.crashTimer;
   sim.ghost = me.ghost;
   sim.ghostTimer = me.ghostTimer;
   gridAccum %= TICK_MS;
   nextSendAt = Date.now(); // Net.resync: anchor send cadence to snapshot arrival
-  lastTraffic = snap.traffic;
 
   // grid-vs-server offset (constant in healthy play, = network latency)
   if (!sim.crashed && !sim.ghost) {
@@ -125,22 +118,20 @@ function runFrame(): void {
   const rx = prev.x + (sim.x - prev.x) * u + visualCorrection.x;
   const rd = prev.distance + (sim.distance - prev.distance) * u + visualCorrection.distance;
 
-  // local crash detection, verbatim Game.ts: check against latest snapshot traffic
-  if (!sim.crashed && !sim.ghost && lastTraffic.length) {
-    playerHitsTraffic(rx, lastTraffic, rd, () => {
-      localCrashPending = true;
-      crash(sim);
-    });
-  }
-
-  // jitter = discontinuity in the rendered motion (skip crash/ghost transitions)
+  // jitter = discontinuity in the rendered motion (skip crash/ghost
+  // transitions; a gap between tracked frames must not count as a jump)
   if (!sim.crashed && !sim.ghost) {
-    if (frames > 0) {
-      maxFrameDeltaX = Math.max(maxFrameDeltaX, Math.abs(rx - lastRx));
-      maxFrameDeltaDist = Math.max(maxFrameDeltaDist, Math.abs(rd - lastRd));
+    if (trackedPrev) {
+      const dx = Math.abs(rx - lastRx);
+      const dd = Math.abs(rd - lastRd);
+      maxFrameDeltaX = Math.max(maxFrameDeltaX, dx);
+      maxFrameDeltaDist = Math.max(maxFrameDeltaDist, dd);
     }
     lastRx = rx;
     lastRd = rd;
+    trackedPrev = true;
+  } else {
+    trackedPrev = false;
   }
   frames++;
 }

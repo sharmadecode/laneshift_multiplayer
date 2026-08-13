@@ -40,6 +40,17 @@ export const TRAFFIC_LANE_DRIFT = 0.85; // max lateral drift inside a lane (clos
 export const TRAFFIC_DENSITY_MIN = 0.55;
 export const TRAFFIC_DENSITY_MAX = 1.3;
 
+// ---- Multi-anchor traffic (personal packs for stranded racers) ----
+export const TRAFFIC_PACK_PER_LANE = 3; // cars per lane in one personal pack seed
+export const TRAFFIC_PACK_COOLDOWN_MS = 8000; // min gap between seeds for one racer
+export const TRAFFIC_PACK_STRANDED = 530; // m behind the traffic front before seeding (window + margin)
+export const TRAFFIC_PACK_NEAREST = 180; // m: seeds never appear closer than this (fog-hidden)
+export const TRAFFIC_MAX_CARS = 60; // absolute hard cap on cars in one room
+export const PLAYER_ACTIVE_SPEED = 5; // m/s: above this a racer is "racing"
+export const PLAYER_IDLE_SPEED = 2; // m/s: below this a racer drifts toward inactive
+export const PLAYER_IDLE_GRACE = 4; // s: sustained idle before excluded from lead/trail
+export const JOIN_BEHIND_TRAIL_M = 100; // late-join spawn distance behind the trailing racer
+
 // ---- Crash / respawn ----
 export const CRASH_TIME = 3.0; // respawn delay after crash (s)
 export const GHOST_TIME = 1.2; // no-collision grace after respawn (s)

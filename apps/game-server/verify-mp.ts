@@ -104,6 +104,19 @@ setTimeout(() => {
   console.log(`B: ${sB.count} snapshots (${rateB.toFixed(1)}/s)`);
   console.log(`remote motion: ${bSamples} inter-snapshot samples, backward moves=${wrongDir}`);
   console.log(`traffic parity: ${compared} same-tick comparisons, mismatches=${mismatches}`);
+
+  // traffic presence: the spawn window (430 m) must actually fill near the
+  // leader. Regression: an empty room once seeded the spawner with -Infinity,
+  // dumping the whole 24-car budget far ahead (~2 km of empty road).
+  const lastTraffic = sA.lastSnap?.traffic ?? [];
+  const lead = Math.max(
+    0,
+    ...[...(sA.lastSnap?.players ?? []), ...(sB.lastSnap?.players ?? [])].map((p) => p.distance)
+  );
+  const ahead = lastTraffic.filter(
+    (c) => Number.isFinite(c.roadDist) && c.roadDist - lead > -80 && c.roadDist - lead < 500
+  ).length;
+  console.log(`traffic: ${lastTraffic.length} cars on server, ${ahead} within 500 m ahead of leader`);
   const aCrashed = !!sA.lastSnap?.players.find((p) => p.id === sA.id)?.crashed;
   const bCrashed = !!sB.lastSnap?.players.find((p) => p.id === sB.id)?.crashed;
   console.log(`crash state at end: A=${aCrashed}, B=${bCrashed}`);
@@ -115,7 +128,12 @@ setTimeout(() => {
     console.log('crash parity: no crash occurred in window (informational)');
   }
   const ok =
-    rateA >= 18 && rateB >= 18 && compared >= 50 && mismatches === 0 && wrongDir === 0;
+    rateA >= 18 &&
+    rateB >= 18 &&
+    compared >= 50 &&
+    mismatches === 0 &&
+    wrongDir === 0 &&
+    ahead >= 6;
   console.log(
     ok
       ? 'PASS: two-client acceptance (snapshot rate, traffic parity, remote continuity)'
