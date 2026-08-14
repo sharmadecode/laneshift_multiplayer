@@ -485,17 +485,19 @@ export class Hud {
     this.tachSegs = Array.from(hud.querySelectorAll('.tach-seg'));
   }
 
-  update(state: { speed: number; distance: number }): void {
+  update(state: { speed: number; distance: number; rpm?: number; gear?: number }): void {
     this.lastDistance = state.distance;
     const kmh = Math.round(state.speed * MS_TO_KMH);
-    this.speedEl.innerHTML = `${kmh}<small>KM/H</small>`;
+    const gearText = state.gear ? ` \u00b7 G${state.gear}` : '';
+    this.speedEl.innerHTML = `${kmh}<small>KM/H${gearText}</small>`;
     const km = state.distance >= 1000;
     this.distEl.textContent = km
       ? `${(state.distance / 1000).toFixed(2)} KM`
       : `${Math.round(state.distance)} M`;
 
-    const speedRatio = Math.min(1, Math.max(0, kmh / 209));
-    const activeCount = Math.round(speedRatio * this.tachSegs.length);
+    // Tachometer segments follow real engine RPM
+    const rpmNorm = state.rpm ? Math.min(1, Math.max(0, (state.rpm - 1000) / 7200)) : Math.min(1, Math.max(0, kmh / 209));
+    const activeCount = Math.round(rpmNorm * this.tachSegs.length);
     for (let i = 0; i < this.tachSegs.length; i++) {
       this.tachSegs[i].classList.toggle('active', i < activeCount);
     }

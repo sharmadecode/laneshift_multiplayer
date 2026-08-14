@@ -132,6 +132,19 @@ export function createCarMesh(opts: CarMeshOptions): THREE.Group {
     addBox(0.5, 0.16, 0.08, headMat, 0.7, 0.74, -2.32);
     addBox(0.44, 0.22, 0.08, tailMat, -0.76, 0.94, 2.32);
     addBox(0.44, 0.22, 0.08, tailMat, 0.76, 0.94, 2.32);
+  } else if (type === 'van') {
+    // === Delivery Van / Commercial Vehicle ===
+    addBox(2.1, 1.35, 4.8, bodyMat, 0, 1.05, 0.1);
+    addBox(1.98, 0.42, 1.05, bodyMat, 0, 0.65, -1.95);
+    addBox(1.85, 0.58, 1.1, glassMat, 0, 1.18, -1.35); // Big front windshield
+    addBox(2.05, 0.2, 0.4, trimMat, 0, 0.3, -2.48); // Front commercial bumper
+    addBox(2.05, 0.2, 0.4, trimMat, 0, 0.3, 2.5); // Rear step bumper
+
+    // Vertical Commercial Taillights
+    addBox(0.18, 0.7, 0.08, tailMat, -0.92, 1.1, 2.52);
+    addBox(0.18, 0.7, 0.08, tailMat, 0.92, 1.1, 2.52);
+    addBox(0.48, 0.2, 0.08, headMat, -0.75, 0.72, -2.48);
+    addBox(0.48, 0.2, 0.08, headMat, 0.75, 0.72, -2.48);
   } else {
     // === Sedan / Commuter Car ===
     addBox(1.92, 0.4, 4.4, bodyMat, 0, 0.45, 0);

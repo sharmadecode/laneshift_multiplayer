@@ -17,7 +17,7 @@ export class TrafficRenderer {
     for (const car of cars) {
       let mesh = this.pool.get(car.id);
       if (!mesh) {
-        const types: ('sedan' | 'suv' | 'hatchback')[] = ['sedan', 'suv', 'hatchback', 'sedan'];
+        const types: ('sedan' | 'suv' | 'van')[] = ['sedan', 'suv', 'van', 'sedan'];
         const type = types[car.id % types.length];
         mesh = createCarMesh({
           color: TRAFFIC_COLORS[car.colorIndex % TRAFFIC_COLORS.length],

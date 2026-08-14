@@ -147,51 +147,61 @@ export class Road {
     this.sun.shadow.bias = -0.0005;
   }
 
-  /** Realistic, rich dark asphalt highway with crisp markings and tire tread wear. */
+  /** Realistic, rich dark asphalt highway with crisp markings, gravel aggregate, and skid marks. */
   private buildDarkAsphalt(): THREE.Mesh {
     const cv = document.createElement('canvas');
-    cv.width = 512;
-    cv.height = 1024;
+    cv.width = 1024;
+    cv.height = 2048;
     const ctx = cv.getContext('2d')!;
 
     // Rich dark charcoal asphalt base
-    ctx.fillStyle = '#242832';
-    ctx.fillRect(0, 0, 512, 1024);
+    ctx.fillStyle = '#1e222a';
+    ctx.fillRect(0, 0, 1024, 2048);
 
     // Aggregate gravel noise & tar variation
-    for (let i = 0; i < 6000; i++) {
-      const g = 40 + Math.floor(Math.random() * 32);
-      ctx.fillStyle = `rgba(${g},${g + 2},${g + 6},0.35)`;
-      ctx.fillRect(Math.random() * 512, Math.random() * 1024, 2, 2);
+    for (let i = 0; i < 18000; i++) {
+      const g = 32 + Math.floor(Math.random() * 38);
+      ctx.fillStyle = `rgba(${g},${g + 3},${g + 7},0.42)`;
+      ctx.fillRect(Math.random() * 1024, Math.random() * 2048, 2, 2);
     }
 
-    // Subtle tire wear grooves in lane centers
-    const px = 512 / (ROAD_HALF * 2);
+    const px = 1024 / (ROAD_HALF * 2);
+
+    // Tire tread rubber marks and braking skid streaks in lanes
     for (let i = 0; i < LANE_COUNT; i++) {
-      const lx = 256 + (i - LANE_COUNT / 2 + 0.5) * LANE_WIDTH * px;
-      ctx.fillStyle = 'rgba(24, 27, 34, 0.25)';
-      ctx.fillRect(lx - 22, 0, 14, 1024);
-      ctx.fillRect(lx + 8, 0, 14, 1024);
+      const lx = 512 + (i - LANE_COUNT / 2 + 0.5) * LANE_WIDTH * px;
+      // Continuous dark tire grooves
+      ctx.fillStyle = 'rgba(14, 16, 22, 0.35)';
+      ctx.fillRect(lx - 44, 0, 28, 2048);
+      ctx.fillRect(lx + 16, 0, 28, 2048);
+
+      // Occasional heavy braking skid marks
+      for (let s = 0; s < 3; s++) {
+        const sy = (s * 680 + (i * 220)) % 2048;
+        ctx.fillStyle = 'rgba(10, 12, 16, 0.55)';
+        ctx.fillRect(lx - 40, sy, 22, 160);
+        ctx.fillRect(lx + 18, sy, 22, 160);
+      }
     }
 
     const edge = ((LANE_COUNT * LANE_WIDTH) / 2) * px;
 
-    // Darker road shoulders
-    ctx.fillStyle = 'rgba(20, 23, 30, 0.45)';
-    ctx.fillRect(0, 0, 256 - edge - 4, 1024);
-    ctx.fillRect(256 + edge + 4, 0, 256 - edge - 4, 1024);
+    // Darker road shoulders with asphalt grain
+    ctx.fillStyle = 'rgba(16, 18, 24, 0.6)';
+    ctx.fillRect(0, 0, 512 - edge - 8, 2048);
+    ctx.fillRect(512 + edge + 8, 0, 512 - edge - 8, 2048);
 
-    // Solid outer lane boundary lines
+    // Solid outer lane boundary lines with yellow shoulder strip
     ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(256 - edge - 4, 0, 6, 1024);
-    ctx.fillRect(256 + edge - 2, 0, 6, 1024);
+    ctx.fillRect(512 - edge - 8, 0, 10, 2048);
+    ctx.fillRect(512 + edge - 2, 0, 10, 2048);
 
-    // Crisp white dashed center lane separators with yellow accents
+    // Crisp white dashed center lane separators
     ctx.fillStyle = '#ffffff';
     for (let i = 1; i < LANE_COUNT; i++) {
-      const lx = 256 + (i - LANE_COUNT / 2) * LANE_WIDTH * px - 3;
-      for (let y = 0; y < 1024; y += 192) {
-        ctx.fillRect(lx, y, 6, 96);
+      const lx = 512 + (i - LANE_COUNT / 2) * LANE_WIDTH * px - 4;
+      for (let y = 0; y < 2048; y += 384) {
+        ctx.fillRect(lx, y, 8, 192);
       }
     }
 
@@ -202,8 +212,8 @@ export class Road {
 
     const mat = new THREE.MeshStandardMaterial({
       map: this.groundTex,
-      roughness: 0.78,
-      metalness: 0.08
+      roughness: 0.72,
+      metalness: 0.12
     });
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF * 2, GROUND_LEN), mat);

@@ -85,20 +85,22 @@ export class EngineAudio {
     return buf;
   }
 
-  setSpeed(speed: number): void {
+  setSpeed(speed: number, rpm = 1200, gear = 1): void {
     if (!this.ctx || this.muted) return;
     const ratio = Math.min(1, speed / PLAYER_MAX_SPEED);
-    const f = ENGINE_IDLE + (ENGINE_MAX - ENGINE_IDLE) * ratio;
+    // RPM-based pitch: (rpm / 8500) mapped to sports car fundamental frequency
+    const rpmNorm = Math.max(0.12, Math.min(1.0, rpm / 8000));
+    const f = 45 + rpmNorm * 180;
     const t = this.ctx.currentTime;
-    this.osc1?.frequency.setTargetAtTime(f, t, 0.06);
-    this.osc2?.frequency.setTargetAtTime(f * 0.5 + 2, t, 0.06);
-    this.filter?.frequency.setTargetAtTime(380 + f * 3.4, t, 0.06);
-    this.setVol(0.05 + 0.05 * ratio);
+    this.osc1?.frequency.setTargetAtTime(f, t, 0.04);
+    this.osc2?.frequency.setTargetAtTime(f * 0.5 + (gear % 2 === 0 ? 1 : 2.5), t, 0.04);
+    this.filter?.frequency.setTargetAtTime(320 + f * 4.2 + (speed > 10 ? 150 : 0), t, 0.04);
+    this.setVol(0.04 + 0.06 * ratio + (rpm > 6500 ? 0.02 : 0));
 
     // Scale wind rush with speed
     if (this.windGain && this.windFilter) {
-      this.windGain.gain.setTargetAtTime(ratio * 0.045, t, 0.1);
-      this.windFilter.frequency.setTargetAtTime(200 + ratio * 600, t, 0.1);
+      this.windGain.gain.setTargetAtTime(Math.pow(ratio, 1.4) * 0.055, t, 0.08);
+      this.windFilter.frequency.setTargetAtTime(200 + ratio * 750, t, 0.08);
     }
   }
 

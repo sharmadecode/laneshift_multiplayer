@@ -388,7 +388,7 @@ export class Game {
       this.wasCrashed = s.crashed;
 
       if (s.crashed) this.hud.updateCrashTimer(s.crashTimer);
-      this.audio.setSpeed(r.speed);
+      this.audio.setSpeed(r.speed, s.rpm, s.gear);
 
       this.road.update(r.speed * dt, r.x, r.distance);
       this.traffic.sync(this.renderTraffic(), r.distance);
@@ -396,7 +396,7 @@ export class Game {
       this.player.syncVisuals(dt, r);
       this.updateBursts(dt);
       this.updateRaceMeta();
-      this.hud.update({ speed: r.speed, distance: r.distance });
+      this.hud.update({ speed: r.speed, distance: r.distance, rpm: s.rpm, gear: s.gear });
       return;
     }
 
@@ -411,13 +411,13 @@ export class Game {
     this.wasCrashed = s.crashed;
 
     if (s.crashed) this.hud.updateCrashTimer(s.crashTimer);
-    this.audio.setSpeed(s.speed);
+    this.audio.setSpeed(s.speed, s.rpm, s.gear);
 
     this.road.update(s.speed * dt, s.x, s.distance);
     this.traffic.sync(this.spawner.cars, s.distance);
     this.player.syncVisuals(dt);
     this.updateBursts(dt);
-    this.hud.update({ speed: s.speed, distance: s.distance });
+    this.hud.update({ speed: s.speed, distance: s.distance, rpm: s.rpm, gear: s.gear });
   }
 
   private updateRaceMeta(): void {
