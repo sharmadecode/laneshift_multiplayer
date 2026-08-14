@@ -100,13 +100,13 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
   const maxSpeedInGear = GEAR_SPEEDS[curGear];
   const gearProgress = Math.max(0, Math.min(1, (v.speed - minSpeedInGear) / Math.max(1, maxSpeedInGear - minSpeedInGear)));
   const targetRpm = 2500 + gearProgress * 5500 + (input.throttle > 0 ? 500 * input.throttle : 0);
-  v.rpm += (targetRpm - v.rpm) * (1 - Math.pow(Math.E, -12 * dt));
+  v.rpm += (targetRpm - v.rpm) * (1 - Math.exp(-12 * dt));
 
   // --- 3. Dynamic Steering with High-Speed Stability & Tire Grip ---
   // High-speed speed factor tightens responsiveness for precision racing
   const speedNorm = v.speed / PLAYER_MAX_SPEED;
   const steerSensitivity = Math.max(0.65, 1.25 - 0.45 * speedNorm);
-  const k = 1 - Math.pow(Math.E, -STEER_RESPONSE * steerSensitivity * dt);
+  const k = 1 - Math.exp(-STEER_RESPONSE * steerSensitivity * dt);
   const targetSteer = Math.max(-1, Math.min(1, input.steering));
   const oldSteer = v.steering;
   v.steering += (targetSteer - v.steering) * k;
@@ -122,7 +122,7 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
   // Lateral G-Force calculation
   const steerDelta = (v.steering - oldSteer) / Math.max(0.001, dt);
   const rawLateralG = (v.steering * (v.speed / 28) + steerDelta * 0.08);
-  v.lateralG += (rawLateralG - v.lateralG) * (1 - Math.pow(Math.E, -14 * dt));
+  v.lateralG += (rawLateralG - v.lateralG) * (1 - Math.exp(-14 * dt));
 
   // --- 4. Suspension Spring-Damper Dynamics ---
   // Pitch: Throttle lifts front (+rad, squats rear), Braking dives front (-rad, lifts rear)
@@ -131,11 +131,11 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
     : targetAccel < -2
     ? -0.032 * (Math.abs(targetAccel) / BRAKE_DECEL)
     : 0;
-  v.pitch += (targetPitch - v.pitch) * (1 - Math.pow(Math.E, -14 * dt));
+  v.pitch += (targetPitch - v.pitch) * (1 - Math.exp(-14 * dt));
 
   // Roll: Stiff sports anti-roll bar
   const targetRoll = -v.lateralG * 0.022;
-  v.roll += (targetRoll - v.roll) * (1 - Math.pow(Math.E, -14 * dt));
+  v.roll += (targetRoll - v.roll) * (1 - Math.exp(-14 * dt));
 
   // --- 5. Distance Traveled ---
   v.distance += v.speed * dt;

@@ -107,10 +107,19 @@ export class TrafficSpawner {
       }
     }
 
-    // Car-following behavior
+    // Reusable single-pass lane bucketing (zero GC allocations)
+    const lanes: TrafficCar[][] = [[], [], []];
+    for (let i = 0; i < this.cars.length; i++) {
+      const c = this.cars[i];
+      const lIdx = c.lane + 1; // -1 -> 0, 0 -> 1, 1 -> 2
+      if (lIdx >= 0 && lIdx < LANE_COUNT) lanes[lIdx].push(c);
+    }
+
+    // Car-following behavior & forward spawn generation
     for (let l = 0; l < LANE_COUNT; l++) {
-      const lane = this.cars.filter((c) => c.lane === laneCoordinate(l));
+      const lane = lanes[l];
       lane.sort((a, b) => b.roadDist - a.roadDist);
+
       for (let i = 1; i < lane.length; i++) {
         const front = lane[i - 1];
         const back = lane[i];
@@ -122,13 +131,8 @@ export class TrafficSpawner {
           back.speed = Math.min(back.speed, front.speed * TRAFFIC_TAIL_SLOW);
         }
       }
-    }
 
-    // Forward spawn generation
-    for (let l = 0; l < LANE_COUNT; l++) {
-      const lane = this.cars.filter((c) => c.lane === laneCoordinate(l));
-      let frontmost = -Infinity;
-      for (const c of lane) if (c.roadDist > frontmost) frontmost = c.roadDist;
+      let frontmost = lane.length > 0 ? lane[0].roadDist : -Infinity;
       const minSpawn = Math.max(
         lead + TRAFFIC_MIN_SPAWN_AHEAD,
         frontmost + TRAFFIC_FOLLOW_GAP + 2

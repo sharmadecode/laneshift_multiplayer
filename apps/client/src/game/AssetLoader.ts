@@ -140,25 +140,15 @@ export class AssetLoader {
       car.userData.bodyMaterial = bodyMat;
       this.heroCarTemplate = car;
 
-      // 2. Preload Traffic Vehicles (18 distinct curated models)
+      // 2. Preload Traffic Vehicles (8 distinct curated models)
       const trafficModelPaths = [
         { path: '/models/Nissan-GTR.glb', length: 4.65 },
         { path: '/models/quaternius-sports-car.glb', length: 4.5 },
         { path: '/models/police-car.glb', length: 4.6 },
         { path: '/models/Mazda-RX-7.glb', length: 4.35 },
-        { path: '/models/2015-Dodge-Challenger.glb', length: 4.85 },
-        { path: '/models/1994-Nissan-180MX.glb', length: 4.45 },
-        { path: '/models/white-sports-convertible.glb', length: 4.4 },
         { path: '/models/toyota-ae86.glb', length: 4.3 },
-        { path: '/models/ignition-car.glb', length: 4.5 },
-        { path: '/models/1972-Bursley-Defiance.glb', length: 4.8 },
-        { path: '/models/Ambulance.glb', length: 5.2 },
+        { path: '/models/white-sports-convertible.glb', length: 4.4 },
         { path: '/models/car-sedan-01.glb', length: 4.5 },
-        { path: '/models/family-sedan.glb', length: 4.6 },
-        { path: '/models/pastel-sedan.glb', length: 4.5 },
-        { path: '/models/metropolis-taxi-01.glb', length: 4.5 },
-        { path: '/models/taxi-01.glb', length: 4.4 },
-        { path: '/models/Mitsubishi-L200.glb', length: 5.1 },
         { path: '/models/quaternius-suv.glb', length: 4.8 }
       ];
 
@@ -198,29 +188,8 @@ export class AssetLoader {
         { path: '/models/glass-skyscraper-01.glb', height: 110 },
         { path: '/models/glass-supertall-01.glb', height: 145 },
         { path: '/models/Skyscraper.glb', height: 120 },
-        { path: '/models/Skyscraper-BwEXdOoUSO.glb', height: 130 },
-        { path: '/models/Skyscraper-jIRx0AhYOR.glb', height: 115 },
-        { path: '/models/Skyscraper-obYD8hWLTZ.glb', height: 125 },
-        { path: '/models/Skyscraper-PsPe0MzK0E.glb', height: 140 },
-        { path: '/models/Skyscraper-XST1j6kYsL.glb', height: 135 },
-        { path: '/models/Large-Building.glb', height: 85 },
-        { path: '/models/Large-Building-1bt4yYKmuK.glb', height: 80 },
-        { path: '/models/Large-Building-3IhrYZp6tP.glb', height: 75 },
-        { path: '/models/Large-Building-h7Jaq7bqMq.glb', height: 90 },
-        { path: '/models/Large-Building-JgGLJH2iXj.glb', height: 85 },
-        { path: '/models/Large-Building-ppwtREejXg.glb', height: 95 },
-        { path: '/models/Large-Building-sxXonOmtct.glb', height: 80 },
         { path: '/models/TIME-HOTEL-2.10.glb', height: 70 },
-        { path: '/models/Hotel-Building.glb', height: 60 },
-        { path: '/models/Hospital.glb', height: 55 },
-        { path: '/models/midrise-office-01.glb', height: 65 },
-        { path: '/models/waterfront-condo-tower.glb', height: 85 },
-        { path: '/models/apartment-block-01.glb', height: 50 },
-        { path: '/models/Apartment-building.glb', height: 48 },
-        { path: '/models/deco-apartment-walkup.glb', height: 38 },
-        { path: '/models/deco-hotel-three-bay.glb', height: 55 },
-        { path: '/models/Ferris-wheel.glb', height: 45 },
-        { path: '/models/Helicopter.glb', height: 12 }
+        { path: '/models/Hotel-Building.glb', height: 60 }
       ];
       for (const t of towerPaths) {
         try {
@@ -234,21 +203,10 @@ export class AssetLoader {
       // 4. Preload Suburban Houses & Residential Villas (12m - 18m heights)
       const housePaths = [
         { path: '/models/Two-story-house-9N6ROCbmO1.glb', height: 16.5 },
-        { path: '/models/Two-story-house-hmXhiLDf8D.glb', height: 16.0 },
-        { path: '/models/Two-story-house-htvFgnVP4d.glb', height: 16.5 },
-        { path: '/models/Two-story-house-QsF9E0PqyN.glb', height: 15.5 },
-        { path: '/models/Two-story-house-sGgL4Nt7I7.glb', height: 16.0 },
         { path: '/models/House-with-driveway.glb', height: 15.0 },
         { path: '/models/Town-House.glb', height: 17.0 },
-        { path: '/models/House.glb', height: 14.5 },
-        { path: '/models/House-7VSVwAg2T3.glb', height: 15.0 },
-        { path: '/models/two-story-house.glb', height: 16.5 },
         { path: '/models/bungalow-house.glb', height: 13.5 },
-        { path: '/models/ranch-house.glb', height: 13.0 },
-        { path: '/models/home-cottage-01.glb', height: 14.0 },
-        { path: '/models/home-thatched-house-01.glb', height: 13.5 },
-        { path: '/models/farmhouse.glb', height: 16.0 },
-        { path: '/models/garage.glb', height: 9.5 }
+        { path: '/models/home-cottage-01.glb', height: 14.0 }
       ];
       for (const h of housePaths) {
         try {
@@ -259,34 +217,13 @@ export class AssetLoader {
         }
       }
 
-      // 5. Preload Commercial Stores, Strip Malls & Race Grandstands (10m - 18m heights)
+      // 5. Preload Commercial Stores & Strip Mall Storefronts
       const shopPaths = [
         { path: '/models/Low-Building.glb', height: 14.0 },
-        { path: '/models/Low-Building-4RoPd9BkSx.glb', height: 14.5 },
-        { path: '/models/Low-Building-9fEKMpTsAi.glb', height: 13.5 },
-        { path: '/models/Low-Building-AXFdNPAEc9.glb', height: 14.0 },
-        { path: '/models/Low-Building-dYEbYdPfJr.glb', height: 15.0 },
-        { path: '/models/Low-Building-sObKC8Mio2.glb', height: 14.0 },
-        { path: '/models/Low-Building-tuieC1Pj0a.glb', height: 14.5 },
-        { path: '/models/Low-Building-XsFOzw8E5N.glb', height: 13.5 },
-        { path: '/models/Low-Building-zfjlejAxB7.glb', height: 14.0 },
-        { path: '/models/Low-Wide.glb', height: 15.0 },
-        { path: '/models/Low-Wide-DKgknsHjmr.glb', height: 15.5 },
-        { path: '/models/Small-Building.glb', height: 12.5 },
-        { path: '/models/Small-Building-gyjF60t7CG.glb', height: 13.0 },
-        { path: '/models/Small-Building-QjL4Fo9dU9.glb', height: 12.0 },
-        { path: '/models/Small-Building-Rq572hdKEz.glb', height: 13.0 },
-        { path: '/models/Small-Building-t9j9Lof5ul.glb', height: 12.5 },
-        { path: '/models/Small-Building-yLvnMqC9ZG.glb', height: 13.0 },
-        { path: '/models/Low-Poly-Sports-Stands.glb', height: 14.0 },
-        { path: '/models/Market-Stand.glb', height: 8.5 },
-        { path: '/models/Gazebo.glb', height: 9.0 },
         { path: '/models/convenience-store-01.glb', height: 14.0 },
         { path: '/models/corner-store-01.glb', height: 15.5 },
         { path: '/models/bld-general-store-01.glb', height: 14.5 },
-        { path: '/models/general-store.glb', height: 15.5 },
-        { path: '/models/deco-shopfront-row.glb', height: 16.0 },
-        { path: '/models/shop-awning-01.glb', height: 12.0 }
+        { path: '/models/deco-shopfront-row.glb', height: 16.0 }
       ];
       for (const s of shopPaths) {
         try {
@@ -297,89 +234,12 @@ export class AssetLoader {
         }
       }
 
-      // 6. Preload 3D Trees & Foliage (12m - 24m lush canopies)
-      const treePaths = [
-        { path: '/models/Birch-Tree.glb', height: 18.0 },
-        { path: '/models/Pine-Tree.glb', height: 22.0 },
-        { path: '/models/Simple-Tree.glb', height: 17.0 },
-        { path: '/models/Stylized-Tree.glb', height: 16.0 },
-        { path: '/models/Trees.glb', height: 20.0 },
-        { path: '/models/tree-oak-01.glb', height: 18.0 },
-        { path: '/models/lineside-oak.glb', height: 17.0 },
-        { path: '/models/lineside-pine.glb', height: 21.0 },
-        { path: '/models/cypress-tree.glb', height: 22.0 },
-        { path: '/models/date-palm.glb', height: 19.0 },
-        { path: '/models/apple-tree.glb', height: 14.0 },
-        { path: '/models/arborvitae-conifer.glb', height: 15.0 },
-        { path: '/models/metropolis-street-tree-01.glb', height: 14.0 },
-        { path: '/models/bush-round-01.glb', height: 5.5 },
-        { path: '/models/Flower-Bushes.glb', height: 4.5 },
-        { path: '/models/Rocks.glb', height: 4.5 }
-      ];
-      for (const tr of treePaths) {
-        try {
-          const g = await this.gltfLoader.loadAsync(tr.path);
-          this.trees.push(this.normalizeBuilding(g.scene, tr.height));
-        } catch {
-          // Skip
-        }
-      }
-
-      // 7. Preload Street Lamps, Highway Gantries, Billboards & Safety Equipment
-      const lampPaths = [
-        { path: '/models/streetlamp-01.glb', height: 9.5 },
-        { path: '/models/streetlamp.glb', height: 8.8 },
-        { path: '/models/traffic-light-01.glb', height: 8.2 },
-        { path: '/models/Traffic-light.glb', height: 8.0 },
-        { path: '/models/Traffic-light-Q6k7Izx6YD.glb', height: 8.2 },
-        { path: '/models/Billboard.glb', height: 16.0 },
-        { path: '/models/Bus-stop-sign.glb', height: 6.5 },
-        { path: '/models/Stop-sign.glb', height: 5.5 },
-        { path: '/models/Bike-Warning-Road-Sign.glb', height: 5.5 },
-        { path: '/models/Bench.glb', height: 3.0 },
-        { path: '/models/Concrete-Barrier.glb', height: 3.5 },
-        { path: '/models/Barrier-Large.glb', height: 4.0 },
-        { path: '/models/Race-Flag.glb', height: 10.0 }
-      ];
-      for (const p of lampPaths) {
-        try {
-          const g = await this.gltfLoader.loadAsync(p.path);
-          if (p.path.includes('streetlamp')) {
-            this.streetlamps.push(this.normalizeBuilding(g.scene, p.height));
-          } else {
-            this.trafficLights.push(this.normalizeBuilding(g.scene, p.height));
-          }
-        } catch {
-          // Skip
-        }
-      }
-
-      // 8. Preload Farmsteads, Countryside Mills, Windmills, Silos & Pastoral Details
+      // 6. Preload Farmsteads, Countryside Mills, Windmills & Silos
       const pastoralPaths = [
-        { path: '/models/Barn.glb', height: 18.0 },
-        { path: '/models/Big-Barn.glb', height: 21.0 },
-        { path: '/models/Open-Barn.glb', height: 16.0 },
-        { path: '/models/Small-Barn.glb', height: 14.0 },
         { path: '/models/big-red-barn.glb', height: 18.5 },
-        { path: '/models/Silo.glb', height: 24.0 },
-        { path: '/models/Silo-House.glb', height: 22.0 },
-        { path: '/models/Mill.glb', height: 20.0 },
         { path: '/models/Tower-Windmill.glb', height: 26.0 },
-        { path: '/models/Well.glb', height: 5.0 },
-        { path: '/models/Hay.glb', height: 3.5 },
-        { path: '/models/Fence-Long.glb', height: 3.0 },
-        { path: '/models/Fence.glb', height: 3.0 },
-        { path: '/models/sheep.glb', height: 2.2 },
-        { path: '/models/chicken.glb', height: 1.2 },
-        { path: '/models/chicken-coop.glb', height: 4.5 },
-        { path: '/models/signal-box.glb', height: 9.5 },
-        { path: '/models/crossing-keeper-hut.glb', height: 7.0 },
-        { path: '/models/goods-shed.glb', height: 9.0 },
-        { path: '/models/bait-shack.glb', height: 8.5 },
-        { path: '/models/boat-house.glb', height: 10.0 },
-        { path: '/models/pastel-lifeguard-tower.glb', height: 9.5 },
-        { path: '/models/outhouse-privy.glb', height: 5.5 },
-        { path: '/models/coaling-tower-modern.glb', height: 24.0 }
+        { path: '/models/Silo.glb', height: 24.0 },
+        { path: '/models/Mill.glb', height: 20.0 }
       ];
       for (const p of pastoralPaths) {
         try {
@@ -390,17 +250,13 @@ export class AssetLoader {
         }
       }
 
-      // 9. Preload Countryside Railway Trains & Wagons
+      // 7. Preload Countryside Railway Trains & Wagons
       const railwayPaths = [
         { path: '/models/diesel-locomotive.glb', height: 7.5 },
-        { path: '/models/loco-tender.glb', height: 6.5 },
         { path: '/models/passenger-coach.glb', height: 7.0 },
         { path: '/models/mail-coach.glb', height: 7.0 },
-        { path: '/models/freight-van.glb', height: 6.8 },
-        { path: '/models/flatbed-wagon.glb', height: 4.5 },
-        { path: '/models/open-coal-wagon.glb', height: 5.2 },
-        { path: '/models/cattle-wagon.glb', height: 6.5 },
-        { path: '/models/container-flat-wagon.glb', height: 6.2 }
+        { path: '/models/container-flat-wagon.glb', height: 6.2 },
+        { path: '/models/open-coal-wagon.glb', height: 5.2 }
       ];
       for (const r of railwayPaths) {
         try {
@@ -414,7 +270,7 @@ export class AssetLoader {
       this.isLoaded = true;
       for (const cb of this.loadCallbacks) cb();
       this.loadCallbacks = [];
-      console.log(`[AssetLoader] Successfully preloaded 18-car traffic fleet, ${this.towers.length} towers, ${this.houses.length} houses, ${this.shops.length} commercial stores, ${this.trees.length} trees, ${this.streetlamps.length} lamps, ${this.pastoralProps.length} pastoral landmarks, ${this.railwayCars.length} train wagons.`);
+      console.log(`[AssetLoader] Preloaded lean model fleet: ${this.trafficTemplates.length} cars, ${this.towers.length} towers, ${this.houses.length} houses, ${this.shops.length} shops, ${this.pastoralProps.length} pastoral, ${this.railwayCars.length} railway wagons.`);
     } catch (err) {
       console.warn('[AssetLoader] Error preloading GLB assets:', err);
     }

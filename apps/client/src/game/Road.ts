@@ -714,8 +714,8 @@ export class Road {
       this.sceneryProps.push({ obj, initZ: z, period: SCENERY_PERIOD });
     };
 
-    // 24 Landmark buildings spaced every 85m across the 5 Biomes
-    const landmarkInterval = 85;
+    // 16 Landmark buildings spaced every 125m across the 5 Biomes
+    const landmarkInterval = 125;
     const numSlots = Math.floor(SCENERY_PERIOD / landmarkInterval);
 
     for (let i = 0; i < numSlots; i++) {

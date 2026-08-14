@@ -15,6 +15,8 @@ export class EngineAudio {
   private windGain: GainNode | null = null;
   private muted = false;
   private lastVol = 0;
+  private lastUpdate = 0;
+  private lastRpm = 0;
 
   /** Must be called from a user gesture (autoplay policy). */
   init(): void {
@@ -87,6 +89,11 @@ export class EngineAudio {
 
   setSpeed(speed: number, rpm = 1200, gear = 1): void {
     if (!this.ctx || this.muted) return;
+    const now = performance.now();
+    if (now - this.lastUpdate < 32 && Math.abs(rpm - this.lastRpm) < 80) return;
+    this.lastUpdate = now;
+    this.lastRpm = rpm;
+
     const ratio = Math.min(1, speed / PLAYER_MAX_SPEED);
     // RPM-based pitch: (rpm / 8500) mapped to sports car fundamental frequency
     const rpmNorm = Math.max(0.12, Math.min(1.0, rpm / 8000));
