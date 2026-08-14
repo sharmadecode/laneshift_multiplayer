@@ -1,5 +1,5 @@
 {
-  "name": "highway-rush",
+  "name": "laneshift-multiplayer",
   "private": true,
   "version": "0.1.0",
   "workspaces": [
@@ -11,6 +11,8 @@
     "dev:server": "npm run dev -w @hr/game-server",
     "dev:all": "concurrently -k -n client,server -c cyan,yellow \"npm:dev\" \"npm:dev:server\"",
     "build": "npm run build -w @hr/client",
+    "start": "npm run start -w @hr/game-server",
+    "test": "npx tsx apps/game-server/verify-rooms.ts",
     "preview": "npm run preview -w @hr/client",
     "typecheck": "npm run typecheck -w @hr/client && npm run typecheck -w @hr/game-server"
   },

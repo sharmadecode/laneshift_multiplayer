@@ -23,7 +23,7 @@ export const LATERAL_SPEED = 12; // m/s lateral lane-change speed (at top speed)
 export const STEER_RESPONSE = 10; // 1/s steering input smoothing rate
 export const STEER_ROLL = 0.26; // rad body roll when steering
 export const STEER_YAW = 0.2; // rad nose yaw when steering
-export const START_SPEED = 20;
+export const START_SPEED = 0;
 
 // ---- Traffic ----
 export const TRAFFIC_SPEED_MIN = 15;

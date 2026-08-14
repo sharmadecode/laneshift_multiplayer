@@ -11,6 +11,8 @@ export class EngineAudio {
   private filter: BiquadFilterNode | null = null;
   private gain: GainNode | null = null;
   private noiseBuf: AudioBuffer | null = null;
+  private windFilter: BiquadFilterNode | null = null;
+  private windGain: GainNode | null = null;
   private muted = false;
   private lastVol = 0;
 
@@ -53,17 +55,51 @@ export class EngineAudio {
     o2.start();
     this.osc1 = o1;
     this.osc2 = o2;
+
+    // Wind rush node
+    const windNoise = this.createNoiseBuffer(ctx);
+    const windSrc = ctx.createBufferSource();
+    windSrc.buffer = windNoise;
+    windSrc.loop = true;
+    const windFilter = ctx.createBiquadFilter();
+    windFilter.type = 'bandpass';
+    windFilter.frequency.value = 240;
+    windFilter.Q.value = 1.2;
+    const windGain = ctx.createGain();
+    windGain.gain.value = 0;
+    windSrc.connect(windFilter);
+    windFilter.connect(windGain);
+    windGain.connect(ctx.destination);
+    windSrc.start();
+    this.windFilter = windFilter;
+    this.windGain = windGain;
+
     this.setSpeed(0);
+  }
+
+  private createNoiseBuffer(ctx: AudioContext): AudioBuffer {
+    const len = ctx.sampleRate * 2;
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
   }
 
   setSpeed(speed: number): void {
     if (!this.ctx || this.muted) return;
-    const f = ENGINE_IDLE + (ENGINE_MAX - ENGINE_IDLE) * Math.min(1, speed / PLAYER_MAX_SPEED);
+    const ratio = Math.min(1, speed / PLAYER_MAX_SPEED);
+    const f = ENGINE_IDLE + (ENGINE_MAX - ENGINE_IDLE) * ratio;
     const t = this.ctx.currentTime;
     this.osc1?.frequency.setTargetAtTime(f, t, 0.06);
     this.osc2?.frequency.setTargetAtTime(f * 0.5 + 2, t, 0.06);
     this.filter?.frequency.setTargetAtTime(380 + f * 3.4, t, 0.06);
-    this.setVol(0.05 + 0.05 * Math.min(1, speed / PLAYER_MAX_SPEED));
+    this.setVol(0.05 + 0.05 * ratio);
+
+    // Scale wind rush with speed
+    if (this.windGain && this.windFilter) {
+      this.windGain.gain.setTargetAtTime(ratio * 0.045, t, 0.1);
+      this.windFilter.frequency.setTargetAtTime(200 + ratio * 600, t, 0.1);
+    }
   }
 
   crash(): void {

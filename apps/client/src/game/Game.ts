@@ -2,7 +2,15 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { CRASH_TIME, TICK_RATE, type FinishMsg, type InputMsg, type MatchResultMsg, type RoomSettings, type RoomStateMsg, type WorldSnapshot } from '@hr/shared';
+import {
+  TICK_RATE,
+  type FinishMsg,
+  type InputMsg,
+  type MatchResultMsg,
+  type RoomSettings,
+  type RoomStateMsg,
+  type WorldSnapshot
+} from '@hr/shared';
 import {
   crash,
   playerHitsTraffic,
@@ -20,19 +28,17 @@ import { Input } from './Input';
 import { Hud, type Preset } from './Hud';
 import { EngineAudio } from './Audio';
 import { Net } from './Net';
+import { assetLoader } from './AssetLoader';
 
 type Mode = 'start' | 'running' | 'paused';
 type NetPhase = 'none' | 'lobby' | 'countdown' | 'racing' | 'finished';
 
-// A small visual delay gives the client two authoritative snapshots to blend
-// between. It removes packet-to-packet jumps without making friends feel late.
 const REMOTE_DELAY_MS = 120;
 
 interface SnapshotSample {
   prev: WorldSnapshot;
   next: WorldSnapshot;
   t: number;
-  /** Seconds past the newest snapshot; forward-extrapolate render data. */
   extrapDt?: number;
 }
 
@@ -48,9 +54,9 @@ interface PresetCfg {
 }
 
 const PRESETS: Record<Preset, PresetCfg> = {
-  low: { pixelRatio: 1, shadows: false, density: 0.55, bloom: false, far: 700, fog: 0.014, buildings: 18, lamps: 18 },
-  medium: { pixelRatio: Math.min(window.devicePixelRatio, 1.5), shadows: false, density: 0.8, bloom: true, far: 1000, fog: 0.011, buildings: 30, lamps: 25 },
-  high: { pixelRatio: Math.min(window.devicePixelRatio, 2), shadows: true, density: 1.0, bloom: true, far: 1400, fog: 0.009, buildings: 46, lamps: 25 }
+  low: { pixelRatio: 1, shadows: false, density: 0.55, bloom: false, far: 900, fog: 0.0045, buildings: 18, lamps: 18 },
+  medium: { pixelRatio: Math.min(window.devicePixelRatio, 1.5), shadows: false, density: 0.8, bloom: true, far: 1300, fog: 0.0032, buildings: 30, lamps: 25 },
+  high: { pixelRatio: Math.min(window.devicePixelRatio, 2), shadows: true, density: 1.0, bloom: true, far: 1600, fog: 0.0028, buildings: 46, lamps: 25 }
 };
 
 interface Burst {
@@ -58,6 +64,19 @@ interface Burst {
   vel: Float32Array;
   life: number;
   ttl: number;
+}
+
+function disposeHierarchy(obj: THREE.Object3D): void {
+  obj.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.geometry?.dispose();
+      if (Array.isArray(child.material)) {
+        for (const m of child.material) m.dispose();
+      } else if (child.material) {
+        child.material.dispose();
+      }
+    }
+  });
 }
 
 export class Game {
@@ -82,7 +101,6 @@ export class Game {
   private fpsFrames = 0;
   private fpsTime = 0;
 
-  // --- multiplayer ---
   private online = false;
   private net: Net | null = null;
   private netPhase: NetPhase = 'none';
@@ -91,19 +109,14 @@ export class Game {
   private lastResult: MatchResultMsg | null = null;
   private remotes = new Map<string, THREE.Group>();
   private snapHistory: WorldSnapshot[] = [];
-  /** Maps the server's Date.now clock into this client's Date.now clock. */
   private serverClockOffsetMs: number | null = null;
   private serverCrashed = false;
 
-  // --- client prediction: local car stepped on the server's 30 Hz grid ---
-  /** Input most recently ACCEPTED by the network layer (what the server has). */
   private latestSentInput: InputState | null = null;
   private gridStepMs = 1000 / TICK_RATE;
   private gridAccum = 0;
   private prevGrid: VehicleState | null = null;
   private pendingInputs: InputMsg[] = [];
-  // Reconciliation changes the hidden prediction state immediately, but the
-  // renderer eases that correction over a few frames so the road never yanks.
   private visualCorrection = { x: 0, speed: 0, distance: 0, steering: 0 };
 
   constructor(private container: HTMLElement) {
@@ -112,6 +125,8 @@ export class Game {
     this.renderer.toneMappingExposure = 1.15;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
+    this.scene.environment = assetLoader.generateEnvironmentMap(this.renderer);
+    void assetLoader.preload();
 
     this.player = new Player(this.scene);
     this.road = new Road(this.scene, {
@@ -191,50 +206,58 @@ export class Game {
     this.mode = 'running';
   }
 
-  /** SOLO RACE: a solo run is fully offline — drop the socket so no stray inputs fly. */
   private beginSolo(): void {
+    this.hud.requestLandscapeLock();
     this.net?.disconnect();
     this.net = null;
     this.online = false;
     this.netPhase = 'none';
+    this.hud.setReconnecting(false);
+    this.hud.setNet('OFFLINE', false);
+    this.player.reset();
+    this.hud.resetRun();
+    this.spawner.reset(this.density);
     this.beginRun();
   }
 
   private enterMenu(): void {
     this.mode = 'start';
     this.netPhase = 'none';
+    this.hud.hidePause();
     this.hud.showMenu();
     this.player.reset();
     this.hud.resetRun();
     this.serverCrashed = false;
+    if (!this.net) this.connectNet();
   }
 
   private createRoom(): void {
+    this.hud.requestLandscapeLock();
     this.net?.createRoom(this.hud.name).then((r) => {
       if (!r.ok) this.hud.menuError(r.error ?? 'failed to create room');
     });
   }
 
-  /** Auto-fill an open session; the server starts a fresh endless room when none exists. */
   private quickJoin(): void {
+    this.hud.requestLandscapeLock();
     this.net?.quickJoin(this.hud.name).then((r) => {
       if (!r.ok) this.hud.menuError(r.error ?? 'quick join failed');
     });
   }
 
   private joinRoom(code: string): void {
+    this.hud.requestLandscapeLock();
     this.net?.joinRoom(code, this.hud.name).then((r) => {
       if (!r.ok) this.hud.menuError(r.error ?? 'failed to join room');
     });
   }
 
-  /** Fresh match (matchStart) or mid-race rejoin (roomState racing). */
   private startRaceFlow(resetCar: boolean): void {
     if (resetCar) {
       this.player.reset();
       this.hud.resetRun();
       this.pendingInputs.length = 0;
-      this.latestSentInput = null;
+      this.latestSentInput = { steering: 0, throttle: this.input.autoThrottle ? 1 : 0, brake: 0 };
       this.prevGrid = null;
       this.visualCorrection = { x: 0, speed: 0, distance: 0, steering: 0 };
       this.snapHistory.length = 0;
@@ -264,8 +287,6 @@ export class Game {
         this.netPhase = 'lobby';
         break;
       case 'countdown':
-        // The lobby card would cover the countdown number (higher z-index);
-        // players already in the race don't need it for 5 seconds.
         this.hud.hideLobby();
         this.hud.showCountdown(state.countdownT);
         this.netPhase = 'countdown';
@@ -335,28 +356,21 @@ export class Game {
     const s = this.player.state;
 
     if (this.online && this.net) {
-      const sent = this.net.sendInput({ steering: input.steering, throttle: input.throttle, brake: input.brake });
+      const sent = this.net.sendInput(input);
       if (sent) {
         this.latestSentInput = sent;
         this.pendingInputs.push(sent);
-        // A disconnected tab can otherwise retain an unbounded prediction queue.
         if (this.pendingInputs.length > 90) this.pendingInputs.shift();
       }
 
-      // Step the local car on the server's 30 Hz tick grid, applying the input
-      // the server actually has. Never an input that was only read locally —
-      // the server trajectory is then exactly ours delayed by latency.
       this.gridAccum += dt * 1000;
       while (this.gridAccum >= this.gridStepMs) {
         this.gridAccum -= this.gridStepMs;
         this.prevGrid = { ...s };
-        stepPlayer(s, this.latestSentInput ?? input, 1 / TICK_RATE);
+        stepPlayer(s, input, 1 / TICK_RATE);
       }
 
-      // Interpolate between the last two grid states for smooth 60 fps motion.
       const r = this.predictedRenderState();
-      // Large corrections (for example, after a backgrounded tab) should be
-      // imperceptible camera/road drift, never a visible one-frame snap.
       const correctionKeep = Math.exp(-2 * dt);
       this.visualCorrection.x *= correctionKeep;
       this.visualCorrection.speed *= correctionKeep;
@@ -378,7 +392,7 @@ export class Game {
 
       this.road.update(r.speed * dt);
       this.traffic.sync(this.renderTraffic(), r.distance);
-      this.syncRemotes(dt);
+      this.syncRemotes();
       this.player.syncVisuals(dt, r);
       this.updateBursts(dt);
       this.updateRaceMeta();
@@ -386,7 +400,7 @@ export class Game {
       return;
     }
 
-    // ---- offline fallback ----
+    // Offline simulation
     this.player.update(input, dt);
     this.spawner.update([{ distance: s.distance, active: true }], dt);
 
@@ -447,8 +461,10 @@ export class Game {
         if (m.playerId === this.net?.playerId) this.hud.showFinish(m);
       },
       onMatchResult: (m) => this.onMatchResult(m),
-      onHostChanged: () => undefined, // roomState always follows hostChanged
-      onDisconnect: () => this.hud.setReconnecting(true),
+      onHostChanged: () => undefined,
+      onDisconnect: () => {
+        if (this.online) this.hud.setReconnecting(true);
+      },
       onRejoinFailed: () => {
         this.online = false;
         this.hud.setNet('OFFLINE', false);
@@ -461,7 +477,6 @@ export class Game {
     });
   }
 
-  /** Server snapshot: background confirmation; only corrects real divergences. */
   private onSnapshot(snap: WorldSnapshot): void {
     const measuredOffset = Date.now() - snap.ts;
     this.serverClockOffsetMs = this.serverClockOffsetMs === null
@@ -471,28 +486,20 @@ export class Game {
     this.snapHistory.push(snap);
     if (this.snapHistory.length > 40) this.snapHistory.shift();
     this.hud.setNet(`ONLINE \u00b7 ${snap.players.length}`, true);
-    // Anchor send cadence to snapshot arrival: ~1 input per server tick.
     this.net?.resync(performance.now());
 
     const me = snap.players.find((p) => p.id === this.net?.playerId);
     if (!me) return;
 
     const s = this.player.state;
-
-    // Motion reconciliation: only a real divergence (dropped frames / tab
-    // hidden / input collapse) puts us far from the server's view. Crash and
-    // ghost flags are authoritative and applied separately below.
     this.pendingInputs = this.pendingInputs.filter((input) => input.seq > me.appliedSeq);
+
     const needsReconcile =
-      // One server tick plus normal network latency is expected prediction
-      // lead, not an error worth visibly correcting.
       Math.abs(s.x - me.x) > 1.25 ||
       Math.abs(s.speed - me.speed) > 5 ||
       Math.abs(s.distance - me.distance) > 7;
 
     if (needsReconcile) {
-      // Preserve the exact screen position, which may be between two fixed
-      // simulation steps. Preserving only `s` causes a one-tick visual jump.
       const oldVisualState = this.predictedRenderState();
       s.x = me.x;
       s.speed = me.speed;
@@ -508,15 +515,11 @@ export class Game {
       this.visualCorrection.steering += oldVisualState.steering - s.steering;
     }
 
-    // Authoritative flags apply immediately (crash, respawn, ghost).
-    // ghostTimer is left to the local sim: both sides decrement it identically.
     s.crashed = me.crashed;
     s.crashTimer = me.crashTimer;
     s.ghost = me.ghost;
     if (!s.crashed && !s.ghost) s.ghostTimer = 0;
 
-    // Re-anchor the grid phase to the server tick schedule so steps keep
-    // landing on the same boundaries as the server's.
     this.gridAccum %= this.gridStepMs;
 
     if (me.crashed && !this.serverCrashed) this.onRemoteCrash({ playerId: me.id, x: me.x });
@@ -525,10 +528,6 @@ export class Game {
     this.ensureRemoteMeshes(snap);
   }
 
-  /**
-   * Traffic arrives at 20 Hz; interpolate between the last two snapshots so it
-   * moves smoothly relative to the (60 fps) player instead of stuttering.
-   */
   private sampleSnapshots(delayMs = REMOTE_DELAY_MS, extrapolate = false): SnapshotSample | null {
     const history = this.snapHistory;
     if (!history.length || this.serverClockOffsetMs === null) return null;
@@ -554,8 +553,6 @@ export class Game {
   }
 
   private renderTraffic(): TrafficCar[] {
-    // Render traffic in the local car's frame (delay 0, extrapolated past the
-    // newest snapshot): a server-confirmed crash must hit the car you can see.
     const sample = this.sampleSnapshots(0, true);
     if (!sample) return [];
     const { prev, next, t, extrapDt } = sample;
@@ -593,8 +590,6 @@ export class Game {
         this.audio.crash();
         this.hud.showCrash(this.player.state.crashTimer);
       }
-      // Burst at our own rendered car: msg.x is the traffic car's x, up to
-      // a meter away laterally, which looks like a phantom hit.
       this.spawnBurstAt(this.player.state.x, 0);
     } else {
       this.audio.crash();
@@ -608,6 +603,7 @@ export class Game {
     for (const [id, mesh] of this.remotes) {
       if (id === mine || !ids.has(id)) {
         this.scene.remove(mesh);
+        disposeHierarchy(mesh);
         this.remotes.delete(id);
       }
     }
@@ -624,15 +620,12 @@ export class Game {
     }
   }
 
-  private syncRemotes(dt: number): void {
+  private syncRemotes(): void {
     const sample = this.sampleSnapshots();
     if (!sample) return;
     for (const [id, mesh] of this.remotes) {
       const pos = this.interpPlayer(id, sample);
       if (!pos) continue;
-      // The target is already interpolation-smoothed. Applying it equally on
-      // both axes prevents the sideways rubber-band caused by smoothing x
-      // while snapping z.
       mesh.position.x = pos.x;
       mesh.position.z = this.player.state.distance - pos.dist;
     }
@@ -734,9 +727,9 @@ export class Game {
       this.composer.addPass(new RenderPass(this.scene, this.player.camera));
       this.bloomPass = new UnrealBloomPass(
         new THREE.Vector2(window.innerWidth, window.innerHeight),
-        0.55,
-        0.6,
-        0.75
+        0.18,
+        0.4,
+        0.92
       );
       this.composer.addPass(this.bloomPass);
     } else if (!cfg.bloom && this.composer) {
@@ -757,7 +750,6 @@ export class Game {
   }
 }
 
-/** Stable color index for a remote player id. */
 function hashId(id: string): number {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;

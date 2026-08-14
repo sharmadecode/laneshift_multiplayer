@@ -38,26 +38,23 @@ interface AckResult {
   playerId?: string;
 }
 
-// One input per server tick keeps the client-side grid prediction aligned
-// with the server simulation (the server applies only the latest input per tick).
 const SEND_RATE = TICK_RATE;
-
 const LS_TOKEN = 'hr.token';
-const LS_ROOM = 'hr.room'; // { roomId } we are entitled to rejoin
+const LS_ROOM = 'hr.room';
 
 /**
- * Where the authoritative server lives. Env override wins; otherwise the game
- * server is assumed to run on the same host the page was served from (dev:
- * vite on :5199, game server on :5200 — desktop localhost or phone via LAN IP).
+ * Resolves the Socket.IO server URL.
+ * In production / Render: connects to the same origin.
+ * In dev: points to port 5200.
+ * In Capacitor Android: points to VITE_SERVER_URL.
  */
 function serverUrl(): string | undefined {
   const env = import.meta.env.VITE_SERVER_URL as string | undefined;
   if (env) return env;
-  const host = location.hostname;
-  if (host && host !== 'localhost' && host !== '127.0.0.1') {
-    return `http://${host}:5200`;
+  if (typeof location !== 'undefined' && location.port === '5199') {
+    return `http://${location.hostname}:5200`;
   }
-  return 'http://localhost:5200';
+  return undefined;
 }
 
 export class Net {
@@ -79,7 +76,9 @@ export class Net {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const url = serverUrl();
-      const socket = url ? io(url, { transports: ['websocket'], timeout: CONNECT_TIMEOUT_MS }) : io({ transports: ['websocket'], timeout: CONNECT_TIMEOUT_MS });
+      const socket = url
+        ? io(url, { transports: ['websocket'], timeout: CONNECT_TIMEOUT_MS })
+        : io({ transports: ['websocket'], timeout: CONNECT_TIMEOUT_MS });
       this.socket = socket;
 
       const fail = (err: Error) => {
@@ -95,20 +94,18 @@ export class Net {
         this.playerId = w.playerId;
         this.cb.onWelcome(w);
         resolve();
-        // Reclaim our race seat on every fresh connection (page reload or
-        // socket.io reconnection) as long as we have not joined a room in this
-        // session. The saved token survives the tab closing.
+
         const saved = loadRejoin();
         if (saved && saved.roomId && saved.roomId !== this.roomId) {
           this.rejoinRoom(saved.roomId, saved.token).then((r) => {
             if (!r.ok && (r.error === 'rejoin expired' || r.error === 'bad request')) {
-              // Room gone or reservation expired: stop retrying on every reload.
               localStorage.removeItem(LS_ROOM);
               this.cb.onRejoinFailed();
             }
           });
         }
       });
+
       socket.on(NET_EVENTS.snapshot, (snap: WorldSnapshot) => {
         this.lastSnapshot = snap;
         this.cb.onSnapshot(snap);
@@ -138,7 +135,6 @@ export class Net {
     return this.ack(NET_EVENTS.joinRoom, { code, name });
   }
 
-  /** Auto-fill an open session; the server creates an endless room when none exists. */
   quickJoin(name: string): Promise<AckResult> {
     return this.ack(NET_EVENTS.quickJoin, { name });
   }
@@ -158,25 +154,30 @@ export class Net {
   leaveRoom(): void {
     this.socket?.emit(NET_EVENTS.leaveRoom);
     this.roomId = '';
+    this.token = '';
     localStorage.removeItem(LS_ROOM);
+    localStorage.removeItem(LS_TOKEN);
   }
 
-  /** Joined a room: from now on a dropped connection may rejoin it (45 s). */
-  setRoom(roomId: string): void {
+  private setRoom(roomId: string): void {
     this.roomId = roomId;
     localStorage.setItem(LS_ROOM, JSON.stringify({ roomId }));
   }
 
   private ack(event: string, payload: unknown): Promise<AckResult> {
-    const socket = this.socket;
-    if (!socket || !socket.connected) return Promise.resolve({ ok: false, error: 'not connected' });
     return new Promise((resolve) => {
+      const socket = this.socket;
+      if (!socket) {
+        resolve({ ok: false, error: 'not connected' });
+        return;
+      }
       let settled = false;
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        resolve({ ok: false, error: 'no reply' });
-      }, 4000);
+        resolve({ ok: false, error: 'timed out' });
+      }, CONNECT_TIMEOUT_MS);
+
       socket.emit(event, payload, (r: AckResult | undefined) => {
         if (settled) return;
         settled = true;
@@ -195,7 +196,6 @@ export class Net {
     });
   }
 
-  /** Returns the exact input accepted into the prediction buffer, or null if it was not sent. */
   sendInput(input: ClientInput): InputMsg | null {
     const socket = this.socket;
     if (!socket || !socket.connected) return null;
@@ -207,14 +207,6 @@ export class Net {
     return msg;
   }
 
-  /**
-   * Phase-lock input sends to the server tick schedule: a snapshot arrives
-   * ~RTT/2 after each server tick, so sending exactly one tick period after
-   * that lands each input in its own tick window. Without this, ~half of
-   * server ticks see two inputs and collapse one — the client's prediction
-   * then drifts from the authoritative trajectory and reconciliation fires
-   * visible corrections.
-   */
   resync(now: number): void {
     this.lastSend = now;
   }

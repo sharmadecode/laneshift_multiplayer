@@ -11,6 +11,7 @@
   "dependencies": {
     "@hr/shared": "*",
     "@hr/simulation": "*",
+    "sirv": "^3.0.2",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {

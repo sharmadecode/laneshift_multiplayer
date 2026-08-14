@@ -4,7 +4,7 @@ import { initOrientationLock } from './game/Orientation';
 
 export const BUILD_TAG = 'build-o11-rooms';
 
-console.log(`Highway Rush ${BUILD_TAG}`);
+console.log(`LaneShifter: Multiplayer ${BUILD_TAG}`);
 
 initOrientationLock();
 

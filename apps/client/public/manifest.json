@@ -1,0 +1,10 @@
+{
+  "short_name": "LaneShifter",
+  "name": "LaneShifter: Multiplayer",
+  "icons": [],
+  "start_url": "/",
+  "background_color": "#090a10",
+  "theme_color": "#090a10",
+  "display": "standalone",
+  "orientation": "landscape"
+}

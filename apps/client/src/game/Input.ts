@@ -5,7 +5,7 @@ export interface InputOptions {
 }
 
 export class Input {
-  autoThrottle = false;
+  autoThrottle = true;
   sensitivity = 1;
 
   private keys = new Set<string>();
@@ -78,14 +78,20 @@ export class Input {
   /** Current input state for the simulation. */
   read(): InputState {
     const k = this.keys;
-    const steering = this.steerFromKeysOrTouch() * this.sensitivity;
-    const throttle =
-      this.autoThrottle ? 1 :
-      k.has('ArrowUp') || k.has('KeyW') || this.throttleHeld ? 1 : 0;
+    const rawSteer = this.steerFromKeysOrTouch();
+    const steering = Math.max(-1, Math.min(1, rawSteer * this.sensitivity));
     const brake =
-      this.brakeHeld || k.has('ArrowDown') || k.has('KeyS') ? 1 : 0;
+      this.brakeHeld || k.has('ArrowDown') || k.has('KeyS') || k.has('Space') ? 1 : 0;
+    const throttle =
+      brake > 0
+        ? 0
+        : this.autoThrottle
+          ? 1
+          : k.has('ArrowUp') || k.has('KeyW') || this.throttleHeld
+            ? 1
+            : 0;
     return {
-      steering: Math.max(-1, Math.min(1, steering)) as -1 | 0 | 1,
+      steering,
       throttle,
       brake
     };

@@ -12,7 +12,7 @@ import {
 } from '@hr/shared';
 
 export interface InputState {
-  steering: -1 | 0 | 1;
+  steering: number; // -1..1
   throttle: number; // 0..1
   brake: number; // 0..1
 }
@@ -61,7 +61,8 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
 
   // --- lateral (smoothed steering: the car eases into lane changes) ---
   const k = 1 - Math.pow(Math.E, -STEER_RESPONSE * dt);
-  v.steering += (input.steering - v.steering) * k;
+  const targetSteer = Math.max(-1, Math.min(1, input.steering));
+  v.steering += (targetSteer - v.steering) * k;
   const speedFactor = 0.5 + 0.5 * (v.speed / PLAYER_MAX_SPEED);
   v.x += v.steering * LATERAL_SPEED * speedFactor * dt;
   if (Math.abs(v.x) > LANE_RANGE) v.x = Math.sign(v.x) * LANE_RANGE;
@@ -90,5 +91,5 @@ function respawn(v: VehicleState): void {
   v.crashTimer = 0;
   v.ghost = true;
   v.ghostTimer = GHOST_TIME;
-  v.speed = START_SPEED * 0.6;
+  v.speed = 10;
 }

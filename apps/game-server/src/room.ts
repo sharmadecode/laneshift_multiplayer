@@ -44,22 +44,25 @@ interface ServerPlayer {
   name: string;
   state: VehicleState;
   input: ClientInput;
-  receivedSeq: number; // latest seq received (not necessarily stepped yet)
-  appliedSeq: number; // latest seq whose input the sim has actually stepped
-  active: boolean; // racing (or within the idle grace window)
-  inactiveFor: number; // seconds spent below PLAYER_IDLE_SPEED
-  lastPackSeed: number; // Date.now() of the last personal pack seed
+  receivedSeq: number;
+  appliedSeq: number;
+  active: boolean;
+  inactiveFor: number;
+  lastPackSeed: number;
   finished: boolean;
 }
 
-function idle(): ClientInput {
-  return { steering: 0, throttle: 0, brake: 1 };
+function coast(): ClientInput {
+  return { steering: 0, throttle: 0, brake: 0 };
+}
+
+function drive(): ClientInput {
+  return { steering: 0, throttle: 1, brake: 0 };
 }
 
 /**
- * One authoritative match. Phases: lobby -> countdown -> racing -> finished
- * (-> back to lobby via rematch or a short result hold). Runs on the fixed
- * 30 Hz tick; broadcasts 20 Hz snapshots while racing.
+ * Authoritative room simulation.
+ * Manages match lifecycle: Lobby -> Countdown -> Racing -> Finished.
  */
 export class Room {
   readonly players = new Map<string, ServerPlayer>();
@@ -67,17 +70,14 @@ export class Room {
   phase: RoomPhase = 'lobby';
   hostId = '';
   settings: RoomSettings = { mode: 40, density: 0.8 };
-  /** Reconnect seats: playerId -> expiry (Date.now() ms). Set on mid-race disconnect. */
   readonly reservations = new Map<string, number>();
-  /** Player ids in finish order. */
   readonly finishOrder: string[] = [];
-  /** Last match result; replayed to a rejoining player who missed the broadcast. */
   lastResult: MatchResultMsg | null = null;
 
   private spawner = new TrafficSpawner({ density: this.settings.density, seed: ROOM_SEED });
   private tickCount = 0;
   private snapTimer = 0;
-  private clock = 0; // accumulated sim seconds (all phases)
+  private clock = 0;
   private countdownT = 0;
   private countdownAcc = 0;
   private matchClockStart = 0;
@@ -91,7 +91,7 @@ export class Room {
     this.code = code;
   }
 
-  /** Lobby/countdown joins: everyone starts at the line. */
+  /** Adds a player starting at the line during lobby or countdown. */
   addPlayer(id: string, name: string): ServerPlayer {
     const p = this.spawnPlayer(id, name);
     this.players.set(id, p);
@@ -99,31 +99,23 @@ export class Room {
     return p;
   }
 
-  /**
-   * Racing/finished joins (quick join or code join): spawn behind the tail of
-   * the field — at the last racer still crossing — ghosted for GHOST_TIME so
-   * the newcomer can't crash on traffic right at the spawn point.
-   */
+  /** Adds a player mid-race at the back of the active pack with ghost protection. */
   addJoiner(id: string, name: string): ServerPlayer {
     const p = this.spawnPlayer(id, name);
-    const back = this.backOfField();
-    if (back) {
-      p.state.distance = back.state.distance;
-      p.state.speed = back.state.speed;
+    if (this.phase !== 'finished') {
+      const back = this.backOfField();
+      if (back) {
+        p.state.distance = back.state.distance;
+        p.state.speed = back.state.speed;
+      }
+      p.state.ghost = true;
+      p.state.ghostTimer = GHOST_TIME;
     }
-    p.state.ghost = true;
-    p.state.ghostTimer = GHOST_TIME;
     this.players.set(id, p);
     this.broadcast(NET_EVENTS.roomState, this.toRoomState());
     return p;
   }
 
-  /**
-   * Spawn lane for the n-th seat in the room: lanes cycle 0,1,2 and same-lane
-   * pairs get a half-lane lateral split, so up to 6 racers never stack at the
-   * identical line position (players don't collide with each other, so an
-   * identical spawn would look glued together until someone steers away).
-   */
   private spawnX(index: number): number {
     const lane = index % LANE_COUNT;
     const shift = (Math.floor(index / LANE_COUNT) - 0.5) * 1.4;
@@ -135,7 +127,7 @@ export class Room {
       id,
       name: name.slice(0, NAME_MAX_LEN),
       state: { ...createVehicle(), x: this.spawnX(this.players.size) },
-      input: idle(),
+      input: coast(),
       receivedSeq: -1,
       appliedSeq: -1,
       active: true,
@@ -145,7 +137,6 @@ export class Room {
     };
   }
 
-  /** Lowest distance among racers still crossing (finished cars are past the line). */
   private backOfField(): ServerPlayer | null {
     let back: ServerPlayer | null = null;
     for (const p of this.players.values()) {
@@ -160,34 +151,26 @@ export class Room {
     this.reservations.delete(id);
     this.broadcast(NET_EVENTS.playerLeave, { playerId: id });
     this.broadcast(NET_EVENTS.roomState, this.toRoomState());
-    if (!this.players.size) this.spawner.reset(); // fresh deterministic world next match
+    if (!this.players.size) this.spawner.reset();
     else if (this.hostId === id) this.promoteHost();
   }
 
-  /** Mid-race socket loss keeps the seat for RECONNECT_GRACE_MS; lobby/countdown drops are permanent. */
   onDisconnect(id: string): void {
     const p = this.players.get(id);
     if (!p) return;
     if (this.phase === 'racing' || this.phase === 'finished') {
-      p.input = idle(); // the car coasts to a stop; traffic unpins via the idle rule
+      p.input = coast();
       this.reservations.set(id, Date.now() + RECONNECT_GRACE_MS);
     } else {
       this.removePlayer(id);
     }
   }
 
-  /** True while a disconnected seat is still reclaimable. */
   isReserved(id: string): boolean {
     const until = this.reservations.get(id);
     return until !== undefined && until > Date.now();
   }
 
-  /**
-   * Evict the oldest reserved seats (mid-race dropouts) until a new player
-   * fits. Reserved seats are a transient grace, not a right: a full room must
-   * stay playable for newcomers, and the evicted player's token simply expires
-   * ('rejoin expired' on their next attempt).
-   */
   makeRoomFor(): boolean {
     while (this.players.size >= ROOM_MAX_PLAYERS && this.reservations.size > 0) {
       this.removePlayer(this.reservations.keys().next().value as string);
@@ -195,7 +178,6 @@ export class Room {
     return this.players.size < ROOM_MAX_PLAYERS;
   }
 
-  /** Rejoin success: the socket is rebound to the same ServerPlayer, so no state reset. */
   clearReservation(id: string): void {
     this.reservations.delete(id);
   }
@@ -209,7 +191,6 @@ export class Room {
     if (msg.seq > p.receivedSeq) p.receivedSeq = msg.seq;
   }
 
-  /** Host-only. Transitions lobby -> countdown with the chosen settings. */
   startCountdown(settings: RoomSettings): void {
     this.settings = settings;
     this.spawner = new TrafficSpawner({ density: settings.density, seed: ROOM_SEED });
@@ -219,7 +200,6 @@ export class Room {
     this.broadcast(NET_EVENTS.roomState, this.toRoomState());
   }
 
-  /** Host-only. finished -> lobby, same players and settings, finish state cleared. */
   rematch(): void {
     if (this.phase !== 'finished') return;
     this.toLobby();
@@ -250,7 +230,7 @@ export class Room {
     this.tickCount++;
     this.clock += dt;
 
-    if (this.phase === 'lobby') return; // no world state until the match starts
+    if (this.phase === 'lobby') return;
     if (!this.players.size) return;
 
     if (this.phase === 'countdown') {
@@ -267,7 +247,6 @@ export class Room {
       return;
     }
 
-    // racing / finished: full simulation
     const racers: Array<{ distance: number; active: boolean }> = [];
     for (const p of this.players.values()) {
       stepPlayer(p.state, p.input, dt);
@@ -316,7 +295,6 @@ export class Room {
       return;
     }
 
-    // Expire reconnect seats. Sweep throttling keeps the work bounded.
     if (now - this.lastReservationSweep > 1000) {
       this.lastReservationSweep = now;
       for (const [id, until] of this.reservations) {
@@ -330,7 +308,7 @@ export class Room {
     for (const p of this.players.values()) {
       p.state = { ...createVehicle(), x: this.spawnX(seat) };
       seat++;
-      p.input = idle();
+      p.input = coast();
       p.receivedSeq = -1;
       p.appliedSeq = -1;
       p.active = true;
@@ -340,9 +318,9 @@ export class Room {
     }
     this.finishOrder.length = 0;
     this.matchClockStart = this.clock;
-    this.lastResult = null; // a rejoin during the next match must not replay this one's result
+    this.lastResult = null;
     this.phase = 'racing';
-    this.spawner.reset(); // fresh deterministic field from the line
+    this.spawner.reset();
     this.broadcast(NET_EVENTS.matchStart, {});
     this.broadcast(NET_EVENTS.roomState, this.toRoomState());
   }
@@ -350,14 +328,9 @@ export class Room {
   private checkFinishes(): void {
     const target = this.settings.mode === 'endless' ? Infinity : this.settings.mode * 1000;
     if (!Number.isFinite(target)) return;
-    // Reserved seats (mid-race disconnect) can no longer cross the line, so
-    // they must not hold the match hostage until the reservation expires.
+
     const expected = this.players.size - this.reservations.size;
     let allDone = true;
-    // Racers parked long enough to lose the active flag (below PLAYER_IDLE_SPEED
-    // for the full PLAYER_IDLE_GRACE) forfeit: without this, one AFK or crashed-
-    // and-unattended car stops on the road, never crosses the line, and everyone
-    // else waits on the finish overlay forever. They rank after the finishers.
     const dnf: ServerPlayer[] = [];
     for (const p of this.players.values()) {
       if (p.finished || this.reservations.has(p.id)) continue;
@@ -376,9 +349,7 @@ export class Room {
         dnf.push(p);
       }
     }
-    // End the match once every finisher crossed and every non-finished racer is
-    // idle — but never with zero finishers (a match everyone silently no-shows
-    // just keeps running, like endless).
+
     if (allDone && this.finishOrder.length > 0 && this.finishOrder.length + dnf.length === expected) {
       this.phase = 'finished';
       this.resultHoldUntil = this.clock + RESULT_LOBBY_MS / 1000;
@@ -398,7 +369,7 @@ export class Room {
           name: dnf[i].name,
           rank: this.finishOrder.length + i + 1,
           distance: dnf[i].state.distance,
-          timeMs: -1 // DNF
+          timeMs: -1
         });
       }
       this.lastResult = { rankings, mode: this.settings.mode };
@@ -413,8 +384,6 @@ export class Room {
     this.countdownAcc = 0;
     this.finishOrder.length = 0;
     this.lastResult = null;
-    // Drop seats still reserved when the match ends: their sockets are gone and
-    // the lobby must not be haunted by phantoms that block new players.
     for (const id of [...this.reservations.keys()]) this.removePlayer(id);
     this.reservations.clear();
     this.broadcast(NET_EVENTS.roomState, this.toRoomState());

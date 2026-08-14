@@ -2,28 +2,42 @@ import * as THREE from 'three';
 import { PLAYER_MAX_SPEED, STEER_ROLL, STEER_YAW } from '@hr/shared';
 import { createVehicle, stepPlayer, type InputState, type VehicleState } from '@hr/simulation';
 import { createCarMesh } from './CarMesh';
+import { assetLoader } from './AssetLoader';
 
 export class Player {
   readonly state: VehicleState = createVehicle();
   readonly mesh: THREE.Group;
+  private carVisual: THREE.Object3D;
   readonly camera: THREE.PerspectiveCamera;
   readonly headlight: THREE.SpotLight;
 
-  private camPos = new THREE.Vector3(0, 5.4, 9.2);
-  private fov = 62;
-  private baseFov = 62;
+  private camPos = new THREE.Vector3(0, 4.2, 7.4);
+  private fov = 58;
+  private baseFov = 58;
   private shake = 0;
 
   constructor(scene: THREE.Scene) {
-    this.mesh = createCarMesh({ color: 0xe8362b, isPlayer: true });
+    this.mesh = new THREE.Group();
+    const fallback = createCarMesh({ color: 0xe74c3c, isPlayer: true, type: 'hero_gt' });
+    this.mesh.add(fallback);
+    this.carVisual = fallback;
     scene.add(this.mesh);
 
-    this.camera = new THREE.PerspectiveCamera(this.fov, 1, 0.1, 1200);
+    assetLoader.onReady(() => {
+      const glbCar = assetLoader.createHeroCarInstance(0xe74c3c);
+      if (glbCar) {
+        this.mesh.remove(this.carVisual);
+        this.carVisual = glbCar;
+        this.mesh.add(glbCar);
+      }
+    });
+
+    this.camera = new THREE.PerspectiveCamera(this.fov, 1, 0.1, 1400);
     this.camera.position.copy(this.camPos);
 
-    this.headlight = new THREE.SpotLight(0xfff2d9, 220, 140, 0.42, 0.55, 1.4);
-    this.headlight.position.set(0, 1.05, -1.7);
-    this.headlight.target.position.set(0, 0, -60);
+    this.headlight = new THREE.SpotLight(0xfffae6, 25, 60, 0.5, 0.6, 1.2);
+    this.headlight.position.set(0, 0.9, -1.8);
+    this.headlight.target.position.set(0, 0, -40);
     this.mesh.add(this.headlight);
     this.mesh.add(this.headlight.target);
   }
@@ -52,7 +66,10 @@ export class Player {
     }
 
     const spin = (rs * dt) / 0.34;
-    for (const w of m.userData.wheels as THREE.Object3D[]) w.rotation.x -= spin;
+    const wheels = (this.carVisual.userData.wheels ?? m.userData.wheels ?? []) as THREE.Object3D[];
+    for (const w of wheels) {
+      if (w && w.rotation) w.rotation.x -= spin;
+    }
 
     // camera
     const target = new THREE.Vector3(rx * 0.82, 5.4, 9.2);

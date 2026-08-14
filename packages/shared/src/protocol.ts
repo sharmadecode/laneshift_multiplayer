@@ -4,7 +4,7 @@ import type { RoomSettings, TrafficCar } from './types.js';
 
 /** Control input. Clients NEVER send position/speed/collisions as truth. */
 export interface ClientInput {
-  steering: -1 | 0 | 1;
+  steering: number; // -1..1 (float, scales with sensitivity)
   throttle: number; // 0..1
   brake: number; // 0..1
 }

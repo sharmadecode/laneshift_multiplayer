@@ -1,6 +1,9 @@
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { randomBytes, randomInt } from 'node:crypto';
 import { Server, type Socket as ServerSocket } from 'socket.io';
+import sirv from 'sirv';
 import {
   DENSITY_MAX,
   DENSITY_MIN,
@@ -27,26 +30,31 @@ import { Room } from './room.js';
 const PORT = Number(process.env.PORT ?? 5200);
 const ROOM_MODES: RoomMode[] = ['endless', 1, 40, 60, 100];
 
-const httpServer = createServer();
+// Static client handler for Render production deployment
+const clientDist = fileURLToPath(new URL('../../client/dist', import.meta.url));
+const staticServe = existsSync(clientDist) ? sirv(clientDist, { single: true }) : null;
+
+const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+  if (staticServe) {
+    staticServe(req, res);
+  } else {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Highway Rush Game Server Running');
+  }
+});
+
 const io = new Server(httpServer, {
   cors: { origin: true },
   maxHttpBufferSize: 1024
 });
 
-/** code -> Room */
 const rooms = new Map<string, Room>();
-/** socketId -> { playerId, roomId } (playerId survives socket reconnects) */
 const socketToPlayer = new Map<string, { playerId: string; roomId: string }>();
-/** token -> { playerId, roomId }; the client keeps it to rejoin after a drop */
 const tokens = new Map<string, { playerId: string; roomId: string }>();
-/** socketId -> timestamps of recent join/create attempts (rolling minute) */
 const joinAttempts = new Map<string, number[]>();
-/** socketId -> timestamps of recent rejoin attempts */
 const rejoinAttempts = new Map<string, number[]>();
 
 function leaveOtherRooms(socket: ServerSocket): void {
-  // One room per socket: drop stale subscriptions from earlier joins so a
-  // malicious client can't camp in old rooms, draining broadcasts to its socket.
   for (const r of socket.rooms) {
     if (r !== socket.id) socket.leave(r);
   }
@@ -57,8 +65,6 @@ function genCode(): string {
     const code = genCodeOnce();
     if (!rooms.has(code)) return code;
   }
-  // 32^5 codes exist; this fallback is unreachable in practice but must never
-  // throw inside a socket handler (it would take down the whole server).
   let code = genCodeOnce();
   while (rooms.has(code)) code = genCodeOnce();
   return code;
@@ -77,17 +83,14 @@ function genToken(): string {
 }
 
 /**
- * QUICK JOIN candidate: an open session, best-fit first. Racing rooms win
- * (spawn at the back = instant play), then countdown (join at the line), then
- * the fullest lobby room, then finished rooms (result hold — the lobby and a
- * rematch follow within seconds).
+ * Finds the optimal open room for quick join.
+ * Priorities: 1. Racing rooms (spawn at back), 2. Countdown rooms, 3. Lobby rooms.
  */
 function quickJoinTarget(): Room | null {
   let best: Room | null = null;
   let bestRank = -1;
   let bestSize = -1;
   for (const room of rooms.values()) {
-    // Reserved seats (dropout grace) do not block newcomers from filling a room.
     if (room.players.size - room.reservations.size >= ROOM_MAX_PLAYERS) continue;
     const rank = room.phase === 'racing' ? 3 : room.phase === 'countdown' ? 2 : room.phase === 'lobby' ? 1 : 0;
     if (rank > bestRank || (rank === bestRank && room.players.size > bestSize)) {
@@ -119,7 +122,7 @@ function validateSettings(raw: unknown): RoomSettings | null {
 function isValidInput(msg: unknown): msg is InputMsg {
   if (typeof msg !== 'object' || msg === null) return false;
   const m = msg as Record<string, unknown>;
-  const steerOk = m.steering === -1 || m.steering === 0 || m.steering === 1;
+  const steerOk = typeof m.steering === 'number' && Number.isFinite(m.steering) && m.steering >= -1.5 && m.steering <= 1.5;
   const throttleOk = typeof m.throttle === 'number' && Number.isFinite(m.throttle) && m.throttle >= 0 && m.throttle <= 1;
   const brakeOk = typeof m.brake === 'number' && Number.isFinite(m.brake) && m.brake >= 0 && m.brake <= 1;
   return (
@@ -164,7 +167,7 @@ io.on('connection', (socket) => {
     rooms.set(code, room);
     room.hostId = socket.id;
     leaveOtherRooms(socket);
-    socket.join(code); // join before addPlayer so the roomState broadcast reaches us
+    socket.join(code);
     room.addPlayer(socket.id, name);
     socketToPlayer.set(socket.id, { playerId: socket.id, roomId: code });
     const token = genToken();
@@ -184,20 +187,21 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: 'room not found' });
       return;
     }
-    if (!room.makeRoomFor()) {
+    if (room.players.size - room.reservations.size >= ROOM_MAX_PLAYERS) {
       ack?.({ ok: false, error: 'room full' });
       return;
     }
-    // Lobby/countdown joins start at the line; racing/finished joins spawn at
-    // the back of the field (ghosted), so a friend can hop into an active race.
     leaveOtherRooms(socket);
     socket.join(code);
-    if (room.phase === 'lobby' || room.phase === 'countdown') room.addPlayer(socket.id, name);
-    else room.addJoiner(socket.id, name);
-    if (room.lastResult && room.phase === 'finished') socket.emit(NET_EVENTS.matchResult, room.lastResult);
+    if (room.phase === 'racing' || room.phase === 'finished') {
+      room.addJoiner(socket.id, name);
+    } else {
+      room.addPlayer(socket.id, name);
+    }
     socketToPlayer.set(socket.id, { playerId: socket.id, roomId: code });
     const token = genToken();
     tokens.set(token, { playerId: socket.id, roomId: code });
+    if (room.lastResult && room.phase === 'finished') socket.emit(NET_EVENTS.matchResult, room.lastResult);
     ack?.({ ok: true, token, roomId: code, playerId: socket.id });
   });
 
@@ -207,46 +211,55 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: 'bad request' });
       return;
     }
-    let room = quickJoinTarget();
-    if (!room) {
-      // No open session: start a fresh endless highway (the quick-join default).
+    const target = quickJoinTarget();
+    if (!target) {
       const code = genCode();
-      room = new Room((event, payload) => io.to(code).emit(event, payload), code);
+      const room = new Room((event, payload) => io.to(code).emit(event, payload), code);
+      room.settings = { mode: 'endless', density: 1.0 };
       rooms.set(code, room);
       room.hostId = socket.id;
-      room.settings = { mode: 'endless', density: 1.0 };
-    }
-    if (!room.makeRoomFor()) {
-      ack?.({ ok: false, error: 'room full' });
+      leaveOtherRooms(socket);
+      socket.join(code);
+      room.addPlayer(socket.id, name);
+      socketToPlayer.set(socket.id, { playerId: socket.id, roomId: code });
+      const token = genToken();
+      tokens.set(token, { playerId: socket.id, roomId: code });
+      ack?.({ ok: true, token, roomId: code, playerId: socket.id });
       return;
     }
+
     leaveOtherRooms(socket);
-    socket.join(room.code);
-    if (room.phase === 'lobby' || room.phase === 'countdown') room.addPlayer(socket.id, name);
-    else room.addJoiner(socket.id, name);
-    if (room.lastResult && room.phase === 'finished') socket.emit(NET_EVENTS.matchResult, room.lastResult);
-    socketToPlayer.set(socket.id, { playerId: socket.id, roomId: room.code });
+    socket.join(target.code);
+    if (target.phase === 'racing' || target.phase === 'finished') {
+      target.addJoiner(socket.id, name);
+    } else {
+      target.addPlayer(socket.id, name);
+    }
+    socketToPlayer.set(socket.id, { playerId: socket.id, roomId: target.code });
     const token = genToken();
-    tokens.set(token, { playerId: socket.id, roomId: room.code });
-    ack?.({ ok: true, token, roomId: room.code, playerId: socket.id });
+    tokens.set(token, { playerId: socket.id, roomId: target.code });
+    if (target.lastResult && target.phase === 'finished') socket.emit(NET_EVENTS.matchResult, target.lastResult);
+    ack?.({ ok: true, token, roomId: target.code, playerId: socket.id });
   });
 
   socket.on(NET_EVENTS.rejoinRoom, (msg: unknown, ack?: (r: unknown) => void) => {
     const m = msg as RejoinRoomMsg;
-    if (
-      typeof m?.roomId !== 'string' ||
-      typeof m?.token !== 'string' ||
-      rateLimited(rejoinAttempts, socket.id, REJOIN_RATE_MAX, Date.now())
-    ) {
+    if (typeof m?.roomId !== 'string' || typeof m?.token !== 'string' || rateLimited(rejoinAttempts, socket.id, REJOIN_RATE_MAX, Date.now())) {
       ack?.({ ok: false, error: 'bad request' });
       return;
     }
     const info = tokens.get(m.token);
-    const room = info ? rooms.get(info.roomId) : undefined;
-    if (!info || !room || !room.players.has(info.playerId) || !room.isReserved(info.playerId)) {
+    if (!info || info.roomId !== m.roomId) {
       ack?.({ ok: false, error: 'rejoin expired' });
       return;
     }
+    const room = rooms.get(m.roomId);
+    if (!room || !room.players.has(info.playerId) || !room.isReserved(info.playerId)) {
+      tokens.delete(m.token);
+      ack?.({ ok: false, error: 'rejoin expired' });
+      return;
+    }
+
     socketToPlayer.set(socket.id, { playerId: info.playerId, roomId: room.code });
     leaveOtherRooms(socket);
     socket.join(room.code);
@@ -307,10 +320,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// Fixed 30 Hz simulation tick across all rooms, driven by a wall-clock
-// accumulator. Bare setInterval drifts on Windows: a 16 ms OS timer granularity
-// clamps a 33 ms interval to ~47 ms (~21 Hz), which slows the whole world and
-// drags snapshots down to ~15/s instead of the designed 20/s.
+// Fixed 30 Hz simulation loop with wall-clock drift compensation
 const SIM_DT = 1 / TICK_RATE;
 let simAcc = 0;
 let simLast = performance.now();
@@ -323,8 +333,6 @@ setInterval(() => {
     for (const room of rooms.values()) {
       room.tick(SIM_DT);
       if (!room.players.size) {
-        // A dead room must take its players' reconnect tokens with it,
-        // otherwise the token map leaks and stale tokens stay replayable.
         for (const pid of room.players.keys()) removeTokenFor(pid);
         rooms.delete(room.code);
       }
@@ -333,5 +341,5 @@ setInterval(() => {
 }, 5);
 
 httpServer.listen(PORT, () => {
-  console.log(`Highway Rush game server listening on :${PORT}`);
+  console.log(`LaneShifter multiplayer game server listening on :${PORT}`);
 });

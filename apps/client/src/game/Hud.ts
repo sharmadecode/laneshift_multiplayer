@@ -50,7 +50,7 @@ export class Hud {
   readonly brakeBtn: HTMLElement;
   readonly throttleBtn: HTMLElement;
 
-  autoThrottle = false;
+  autoThrottle = true;
   sensitivity = 1;
   sound = true;
   preset: Preset = 'medium';
@@ -58,6 +58,7 @@ export class Hud {
   settings: RoomSettings = { mode: 40, density: 0.8 };
 
   private speedEl: HTMLElement;
+  private tachSegs: HTMLElement[] = [];
   private distEl: HTMLElement;
   private metaEl: HTMLElement;
   private crashOverlay: HTMLElement;
@@ -99,130 +100,228 @@ export class Hud {
     const hud = document.createElement('div');
     hud.className = 'hud';
     hud.innerHTML = `
+      <div class="orientation-overlay" style="display:none">
+        <div class="orientation-card aaa-card">
+          <div class="rotate-phone-anim">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="2" width="16" height="20" rx="3" />
+              <path d="M12 18h.01" />
+              <path d="M19 9a6 6 0 0 0-6-6" stroke-dasharray="3 3" />
+              <path d="M15 3l-2-2-2 2" />
+            </svg>
+          </div>
+          <div class="orientation-title">PLEASE ROTATE TO LANDSCAPE</div>
+          <div class="orientation-sub">Widescreen arcade display required for optimal racing view</div>
+        </div>
+      </div>
+
       <div class="hud-top-left">
-        <div class="hud-speed">0<small>km/h</small></div>
-        <div class="hud-distance">0 m</div>
-        <div class="race-meta hidden"></div>
+        <div class="hud-gauge-card aaa-gauge">
+          <div class="gauge-header">
+            <span class="gauge-label">SPEED</span>
+            <div class="hud-speed">0<small>KM/H</small></div>
+          </div>
+          <div class="tach-bar">
+            <span class="tach-seg"></span>
+            <span class="tach-seg"></span>
+            <span class="tach-seg"></span>
+            <span class="tach-seg"></span>
+            <span class="tach-seg"></span>
+            <span class="tach-seg"></span>
+            <span class="tach-seg"></span>
+            <span class="tach-seg"></span>
+            <span class="tach-seg"></span>
+            <span class="tach-seg"></span>
+          </div>
+          <div class="gauge-footer">
+            <div class="hud-distance">0 M</div>
+            <div class="race-meta hidden"></div>
+          </div>
+        </div>
         <div class="net-chip">OFFLINE</div>
       </div>
-      <button class="settings-btn glass">&#9881;</button>
-      <button class="pause-btn glass" aria-label="Pause">&#10073;&#10073;</button>
-      <div class="settings-panel glass" style="display:none">
-        <div class="panel-title">Settings</div>
+
+      <button class="settings-btn aaa-btn-icon" aria-label="Settings">&#9881;</button>
+      <button class="pause-btn aaa-btn-icon" aria-label="Pause">&#10073;&#10073;</button>
+
+      <div class="settings-panel aaa-modal" style="display:none">
+        <div class="panel-header">
+          <span class="panel-title">SYSTEM SETTINGS</span>
+          <button class="panel-close-btn">&times;</button>
+        </div>
         <div class="setting-row">
-          <label for="hr-preset">Graphics</label>
+          <label for="hr-preset">GRAPHICS LEVEL</label>
           <div class="select-wrap">
             <select id="hr-preset">
-              <option value="low">Low — 30 FPS</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
+              <option value="low">LOW — 30 FPS</option>
+              <option value="medium">MEDIUM — 60 FPS</option>
+              <option value="high">ULTRA — MAX FX</option>
             </select>
           </div>
         </div>
         <div class="setting-row switch-row">
-          <label for="hr-auto">Auto throttle</label>
+          <label for="hr-auto">AUTO THROTTLE</label>
           <label class="switch">
             <input type="checkbox" id="hr-auto" />
             <span class="switch-track"></span>
           </label>
         </div>
         <div class="setting-row switch-row">
-          <label for="hr-sound">Sound</label>
+          <label for="hr-sound">ENGINE SOUND &amp; SFX</label>
           <label class="switch">
             <input type="checkbox" id="hr-sound" />
             <span class="switch-track"></span>
           </label>
         </div>
         <div class="setting-row">
-          <label for="hr-sens">Steering <span class="setting-val" id="hr-sens-val"></span></label>
+          <label for="hr-sens">STEERING RESPONSE <span class="setting-val" id="hr-sens-val"></span></label>
           <input type="range" id="hr-sens" min="0.5" max="1.5" step="0.05" />
         </div>
       </div>
-      <button class="ctl-btn glass ctl-left"><span class="ctl-icon">&#9664;</span></button>
-      <button class="ctl-btn glass ctl-right"><span class="ctl-icon">&#9654;</span></button>
-      <button class="ctl-btn glass ctl-brake"><span class="ctl-label">BRAKE</span></button>
-      <button class="ctl-btn glass ctl-throttle"><span class="ctl-label">THROTTLE</span></button>
+
+      <div class="touch-controls">
+        <div class="touch-steer-group">
+          <button class="ctl-btn ctl-left" aria-label="Steer Left"><span class="ctl-icon">&#9664;</span></button>
+          <button class="ctl-btn ctl-right" aria-label="Steer Right"><span class="ctl-icon">&#9654;</span></button>
+        </div>
+        <div class="touch-pedal-group">
+          <button class="ctl-btn ctl-brake" aria-label="Brake"><span class="ctl-label">BRAKE</span></button>
+          <button class="ctl-btn ctl-throttle" aria-label="Throttle"><span class="ctl-label">THROTTLE</span></button>
+        </div>
+      </div>
+
       <div class="crash-overlay hidden">
-        <div class="crash-box">
+        <div class="crash-box aaa-card">
+          <div class="crash-badge">COLLISION IMPACT</div>
           <div class="title">WRECKED</div>
-          <div class="sub">Respawn in <span class="crash-t">3.0</span>s</div>
+          <div class="sub">RESTARTING IN <span class="crash-t">3.0</span>S</div>
         </div>
       </div>
+
       <div class="pause-overlay hidden">
-        <div class="pause-card glass">
-          <div class="panel-title">Paused</div>
-          <div class="pause-dist" id="hr-pause-dist">0 m</div>
-          <button class="menu-btn glass" id="hr-resume">RESUME</button>
-          <button class="menu-btn glass" id="hr-restart">RESTART</button>
-        </div>
-      </div>
-      <div class="menu-overlay">
-        <div class="menu-card">
-          <div class="game-title">HIGHWAY RUSH</div>
-          <div class="game-sub">neon arcade racing</div>
-          <input class="name-input" maxlength="16" placeholder="your name" spellcheck="false" autocomplete="off" />
-          <button class="menu-btn glass quickjoin-btn">QUICK JOIN</button>
-          <button class="menu-btn glass create-btn">CREATE ROOM</button>
-          <div class="join-row">
-            <input class="code-input" maxlength="5" placeholder="CODE" spellcheck="false" autocomplete="off" />
-            <button class="menu-btn glass join-btn">JOIN</button>
+        <div class="pause-card aaa-card">
+          <div class="card-tag">STATUS: HALTED</div>
+          <div class="panel-title">RACE PAUSED</div>
+          <div class="stat-display">
+            <span class="stat-label">DISTANCE LOGGED</span>
+            <div class="pause-dist" id="hr-pause-dist">0 M</div>
           </div>
-          <button class="menu-btn glass solo-btn solo-ghost">SOLO RACE</button>
-          <div class="menu-err"></div>
+          <div class="pause-actions">
+            <button class="menu-btn aaa-btn-cyan" id="hr-resume"><span>▶ RESUME RACE</span></button>
+            <button class="menu-btn aaa-btn-amber" id="hr-restart"><span>↻ RESTART</span></button>
+            <button class="menu-btn aaa-btn-red" id="hr-pause-menu"><span>⏏ MAIN MENU</span></button>
+          </div>
         </div>
       </div>
+
+      <div class="menu-overlay">
+        <div class="menu-card aaa-card">
+          <div class="hero-brand">
+            <div class="brand-top-row">
+              <span class="brand-pill">ARCADE MULTIPLAYER</span>
+              <span class="brand-version">v2.0</span>
+            </div>
+            <div class="game-title">LANESHIFTER</div>
+            <div class="game-sub">HIGH-SPEED MULTIPLAYER HIGHWAY RACING</div>
+          </div>
+          
+          <div class="menu-section">
+            <div class="input-wrap">
+              <span class="input-icon">🏎️</span>
+              <input class="name-input" maxlength="16" placeholder="ENTER DRIVER NAME..." spellcheck="false" autocomplete="off" />
+            </div>
+            
+            <div class="match-actions">
+              <button class="menu-btn aaa-btn-hero quickjoin-btn">
+                <span class="btn-glow"></span>
+                <span class="btn-text">⚡ QUICK MATCH</span>
+              </button>
+              
+              <div class="room-action-row">
+                <button class="menu-btn aaa-btn-secondary create-btn"><span>CREATE ROOM</span></button>
+                <div class="join-row">
+                  <input class="code-input" maxlength="5" placeholder="CODE" spellcheck="false" autocomplete="off" />
+                  <button class="menu-btn aaa-btn-cyan join-btn"><span>JOIN</span></button>
+                </div>
+              </div>
+              
+              <button class="menu-btn aaa-btn-ghost solo-btn solo-ghost"><span>🏁 SOLO TIME-TRIAL</span></button>
+            </div>
+            
+            <div class="menu-err"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="lobby-overlay hidden">
-        <div class="lobby-card glass">
-          <div class="panel-title">Room</div>
-          <div class="room-code"></div>
-          <div class="room-code-hint">share this code to race together</div>
+        <div class="lobby-card aaa-card">
+          <div class="card-tag">MULTIPLAYER LOBBY</div>
+          <div class="room-code-badge">
+            <span class="room-code-label">ROOM:</span>
+            <div class="room-code"></div>
+            <button class="copy-btn aaa-btn-copy" title="Copy room code">COPY</button>
+          </div>
+          <div class="room-code-hint">Share code with friends to join room</div>
           <div class="lobby-count-row">
+            <span>DRIVERS ON GRID</span>
             <span class="lobby-count">0/6</span>
-            <button class="copy-btn glass">COPY CODE</button>
           </div>
           <div class="lobby-players"></div>
           <div class="host-settings hidden">
             <div class="setting-row">
-              <label for="hr-mode">Race length</label>
+              <label for="hr-mode">RACE LENGTH</label>
               <div class="select-wrap">
                 <select id="hr-mode">
-                  <option value="endless">Endless</option>
-                  <option value="40">40 km</option>
-                  <option value="60">60 km</option>
-                  <option value="100">100 km</option>
+                  <option value="endless">Endless Highway</option>
+                  <option value="40">Sprint (40 km)</option>
+                  <option value="60">Circuit (60 km)</option>
+                  <option value="100">Endurance (100 km)</option>
                 </select>
               </div>
             </div>
             <div class="setting-row">
-              <label for="hr-density">Traffic <span class="setting-val" id="hr-density-val"></span></label>
+              <label for="hr-density">TRAFFIC DENSITY <span class="setting-val" id="hr-density-val"></span></label>
               <input type="range" id="hr-density" min="0.55" max="1.3" step="0.05" />
             </div>
           </div>
-          <button class="menu-btn glass start-btn lobby-start hidden">START RACE</button>
-          <button class="menu-btn glass lobby-leave">LEAVE</button>
+          <div class="lobby-actions">
+            <button class="menu-btn aaa-btn-green start-btn lobby-start hidden"><span>START RACE</span></button>
+            <button class="menu-btn aaa-btn-red lobby-leave"><span>LEAVE ROOM</span></button>
+          </div>
           <div class="lobby-err"></div>
         </div>
       </div>
+
       <div class="countdown-overlay hidden">
-        <div class="countdown-num">3</div>
+        <div class="countdown-card aaa-card">
+          <div class="countdown-num">3</div>
+          <div class="countdown-hint">GET READY</div>
+        </div>
       </div>
+
       <div class="finish-overlay hidden">
-        <div class="finish-box">
-          <div class="finish-title">FINISHED</div>
-          <div class="finish-rank">#2</div>
-          <div class="finish-sub">waiting for other racers&#8230;</div>
+        <div class="finish-box aaa-card">
+          <div class="finish-badge">CHECKERED FLAG</div>
+          <div class="finish-title">RACE FINISHED</div>
+          <div class="finish-rank">#1</div>
+          <div class="finish-sub">WAITING FOR OTHER RACERS…</div>
         </div>
       </div>
+
       <div class="result-overlay hidden">
-        <div class="result-card glass">
-          <div class="panel-title">Race results</div>
+        <div class="result-card aaa-card">
+          <div class="card-tag">RACE CLASSIFICATION</div>
+          <div class="panel-title">LEADERBOARD</div>
           <div class="result-rows"></div>
-          <button class="menu-btn glass result-rematch hidden">REMATCH</button>
-          <button class="menu-btn glass result-menu">MENU</button>
+          <div class="result-actions">
+            <button class="menu-btn aaa-btn-hero result-rematch hidden"><span>REMATCH</span></button>
+            <button class="menu-btn aaa-btn-ghost result-menu"><span>MAIN MENU</span></button>
+          </div>
         </div>
       </div>
-      <div class="steer-indicator">&#9664; HOLD TO STEER &#9654;</div>
-      <div class="hud-hint">A/D or &#8592;&#8594; steer &middot; W/S throttle</div>
+
+      <div class="steer-indicator">&#9664; TAP OR HOLD TO STEER &#9654;</div>
+      <div class="hud-hint">A / D or &#8592;&#8594; Steer &middot; W / Space Throttle &amp; Brake</div>
     `;
     this.root.appendChild(hud);
 
@@ -268,8 +367,8 @@ export class Hud {
     }
     this.steerHint.style.display = isTouch ? 'block' : 'none';
     const hint = isTouch
-      ? 'steer with the arrow buttons, drive with BRAKE/THROTTLE'
-      : 'A/D or \u2190\u2192 steer \u00b7 W/S throttle';
+      ? (this.autoThrottle ? 'steer with arrows \u00b7 tap BRAKE to slow down' : 'steer with arrow buttons, drive with BRAKE/THROTTLE')
+      : (this.autoThrottle ? 'A/D or \u2190\u2192 steer \u00b7 S / Space to brake' : 'A/D or \u2190\u2192 steer \u00b7 W/S throttle');
     hud.querySelector('.hud-hint')!.textContent = hint;
 
     // settings wiring
@@ -333,9 +432,20 @@ export class Hud {
     hud.querySelector('.result-rematch')!.addEventListener('click', () => this.cb.onRematch());
     hud.querySelector('.result-menu')!.addEventListener('click', () => this.cb.onToMenu());
 
+    // settings close button
+    hud.querySelector('.panel-close-btn')!.addEventListener('click', () => {
+      panel.style.display = 'none';
+    });
+
     // pause overlay buttons
     hud.querySelector('#hr-resume')!.addEventListener('click', () => this.cb.onPauseToggle());
     hud.querySelector('#hr-restart')!.addEventListener('click', () => this.cb.onRestart());
+    hud.querySelector('#hr-pause-menu')!.addEventListener('click', () => {
+      this.hidePause();
+      this.cb.onToMenu();
+    });
+
+    this.initOrientationCheck(hud);
 
     const presetSel = hud.querySelector('#hr-preset') as HTMLSelectElement;
     presetSel.value = this.preset;
@@ -371,15 +481,24 @@ export class Hud {
       localStorage.setItem(LS_SENS, String(this.sensitivity));
       this.cb.onSensitivity(this.sensitivity);
     });
+
+    this.tachSegs = Array.from(hud.querySelectorAll('.tach-seg'));
   }
 
   update(state: { speed: number; distance: number }): void {
     this.lastDistance = state.distance;
-    this.speedEl.innerHTML = `${Math.round(state.speed * MS_TO_KMH)}<small>km/h</small>`;
+    const kmh = Math.round(state.speed * MS_TO_KMH);
+    this.speedEl.innerHTML = `${kmh}<small>KM/H</small>`;
     const km = state.distance >= 1000;
     this.distEl.textContent = km
-      ? `${(state.distance / 1000).toFixed(2)} km`
-      : `${Math.round(state.distance)} m`;
+      ? `${(state.distance / 1000).toFixed(2)} KM`
+      : `${Math.round(state.distance)} M`;
+
+    const speedRatio = Math.min(1, Math.max(0, kmh / 209));
+    const activeCount = Math.round(speedRatio * this.tachSegs.length);
+    for (let i = 0; i < this.tachSegs.length; i++) {
+      this.tachSegs[i].classList.toggle('active', i < activeCount);
+    }
   }
 
   setMeta(kmChip: string, rank: number): void {
@@ -561,10 +680,39 @@ export class Hud {
     }
   }
 
+  hidePause(): void {
+    this.pauseOverlay.classList.add('hidden');
+  }
+
+  private initOrientationCheck(hud: HTMLElement): void {
+    const overlay = hud.querySelector('.orientation-overlay') as HTMLElement;
+    if (!overlay) return;
+    const check = () => {
+      const isTouch = window.matchMedia('(pointer: coarse)').matches;
+      const isPortrait = window.innerHeight > window.innerWidth;
+      overlay.style.display = isTouch && isPortrait ? 'flex' : 'none';
+    };
+    window.addEventListener('resize', check);
+    window.addEventListener('orientationchange', check);
+    check();
+  }
+
+  requestLandscapeLock(): void {
+    try {
+      const orientation = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+      if (typeof orientation?.lock === 'function') {
+        orientation.lock('landscape').catch(() => undefined);
+      }
+    } catch {
+      // Ignored if unsupported by browser
+    }
+  }
+
   resetRun(): void {
     this.lastDistance = 0;
-    this.speedEl.innerHTML = `0<small>km/h</small>`;
-    this.distEl.textContent = '0 m';
+    this.speedEl.innerHTML = `0<small>KM/H</small>`;
+    this.distEl.textContent = '0 M';
+    for (const seg of this.tachSegs) seg.classList.remove('active');
     this.crashOverlay.classList.add('hidden');
     this.hideMeta();
   }
@@ -603,7 +751,7 @@ export class Hud {
     const p = localStorage.getItem(LS_PRESET);
     if (p === 'low' || p === 'medium' || p === 'high') this.preset = p;
     const a = localStorage.getItem(LS_AUTO);
-    if (a !== null) this.autoThrottle = a === 'true';
+    this.autoThrottle = a !== null ? a === 'true' : true;
     const s = Number(localStorage.getItem(LS_SENS));
     if (Number.isFinite(s) && s > 0) this.sensitivity = s;
     const so = localStorage.getItem(LS_SOUND);
