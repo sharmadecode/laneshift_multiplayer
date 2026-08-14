@@ -143,11 +143,11 @@ export class Player {
       const f = rs / PLAYER_MAX_SPEED;
       const motionGrip = Math.min(1.0, Math.max(0, rs / 5.0));
       const currentCurve = getTrackCurvature(s.distance);
-      // Grounded sports car suspension: tight body roll + curve lean keeps car glued to asphalt
+      // Grounded sports car suspension: tight body roll + subtle curve lean keeps car glued to asphalt
       m.rotation.x = THREE.MathUtils.lerp(m.rotation.x, s.pitch * 0.35, 16 * dt);
-      const targetRoll = (-rSteer * STEER_ROLL * (0.4 + 0.6 * f) + s.roll * 0.15 - currentCurve * 0.045) * motionGrip;
-      m.rotation.z = THREE.MathUtils.lerp(m.rotation.z, targetRoll, 18 * dt);
-      m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, (-rSteer * STEER_YAW * (0.4 + 0.6 * f) - currentCurve * 0.04) * motionGrip, 16 * dt);
+      const targetRoll = (-rSteer * STEER_ROLL * (0.4 + 0.6 * f) + s.roll * 0.15 - currentCurve * 0.025) * motionGrip;
+      m.rotation.z = THREE.MathUtils.lerp(m.rotation.z, targetRoll, 16 * dt);
+      m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, (-rSteer * STEER_YAW * (0.4 + 0.6 * f) - currentCurve * 0.02) * motionGrip, 14 * dt);
     }
 
     // Wheel spin & active steering yaw on front wheels
@@ -203,10 +203,10 @@ export class Player {
       this.shake = 0;
     }
 
-    // Smoothly damped apex look-ahead camera tracking
-    const apexOffset = getCurveOffset(s.distance, 50);
-    const targetLookX = rx * 0.9 + apexOffset * 0.72 - rSteer * 0.35;
-    this.lookTarget.x = THREE.MathUtils.lerp(this.lookTarget.x, targetLookX, 12 * dt);
+    // Smoothly damped apex look-ahead camera tracking (natural and cinematic)
+    const apexOffset = getCurveOffset(s.distance, 45);
+    const targetLookX = rx * 0.9 + apexOffset * 0.35 - rSteer * 0.3;
+    this.lookTarget.x = THREE.MathUtils.lerp(this.lookTarget.x, targetLookX, 8 * dt);
     this.camera.lookAt(this.lookTarget.x, lookHeight, lookAhead);
 
     // Smooth speed FOV transition (56 deg -> 68 deg)

@@ -116,9 +116,9 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
   const speedGripFactor = Math.min(1.0, Math.max(0, (v.speed - 1.0) / 4.0));
   const lateralVel = v.steering * LATERAL_SPEED * (0.6 + 0.4 * speedNorm) * speedGripFactor;
 
-  // Centrifugal force pushes outward (e.g. curve > 0 means right turn -> car naturally drifts left unless steered)
+  // Centrifugal force gently biases car outward on curves (subtle arcade cornering)
   const curve = getTrackCurvature(v.distance);
-  const centrifugalForce = -curve * Math.pow(speedNorm, 1.25) * 5.2;
+  const centrifugalForce = -curve * Math.pow(speedNorm, 1.2) * 1.2;
 
   v.x += (lateralVel + centrifugalForce) * dt;
   if (Math.abs(v.x) > LANE_RANGE) {
@@ -127,7 +127,7 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
 
   // Lateral G-Force calculation reflecting steering + curve inertia
   const steerDelta = (v.steering - oldSteer) / Math.max(0.001, dt);
-  const rawLateralG = (v.steering * (v.speed / 28) + steerDelta * 0.08) + curve * (v.speed / 26);
+  const rawLateralG = (v.steering * (v.speed / 28) + steerDelta * 0.08) + curve * (v.speed / 45);
   v.lateralG += (rawLateralG - v.lateralG) * (1 - Math.exp(-14 * dt));
 
   // --- 4. Suspension Spring-Damper Dynamics ---
