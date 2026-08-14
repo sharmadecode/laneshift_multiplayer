@@ -4,8 +4,14 @@ import {
   NET_EVENTS,
   TICK_RATE,
   type ClientInput,
+  type CountdownMsg,
   type CrashMsg,
+  type FinishMsg,
+  type HostChangedMsg,
   type InputMsg,
+  type MatchResultMsg,
+  type RoomSettings,
+  type RoomStateMsg,
   type WelcomeMsg,
   type WorldSnapshot
 } from '@hr/shared';
@@ -14,11 +20,30 @@ export interface NetCallbacks {
   onSnapshot: (snap: WorldSnapshot) => void;
   onCrash: (msg: CrashMsg) => void;
   onWelcome: (w: WelcomeMsg) => void;
+  onRoomState: (s: RoomStateMsg) => void;
+  onCountdown: (m: CountdownMsg) => void;
+  onMatchStart: () => void;
+  onFinish: (m: FinishMsg) => void;
+  onMatchResult: (m: MatchResultMsg) => void;
+  onHostChanged: (m: HostChangedMsg) => void;
+  onDisconnect: () => void;
+  onRejoinFailed: () => void;
+}
+
+interface AckResult {
+  ok: boolean;
+  error?: string;
+  token?: string;
+  roomId?: string;
+  playerId?: string;
 }
 
 // One input per server tick keeps the client-side grid prediction aligned
 // with the server simulation (the server applies only the latest input per tick).
 const SEND_RATE = TICK_RATE;
+
+const LS_TOKEN = 'hr.token';
+const LS_ROOM = 'hr.room'; // { roomId } we are entitled to rejoin
 
 /**
  * Where the authoritative server lives. Env override wins; otherwise the game
@@ -38,7 +63,9 @@ function serverUrl(): string | undefined {
 export class Net {
   playerId = '';
   roomId = '';
+  token = '';
   lastSnapshot: WorldSnapshot | null = null;
+  connected = false;
 
   private socket: Socket | null = null;
   private seq = 0;
@@ -66,15 +93,105 @@ export class Net {
       socket.on(NET_EVENTS.welcome, (w: WelcomeMsg) => {
         clearTimeout(timer);
         this.playerId = w.playerId;
-        this.roomId = w.roomId;
         this.cb.onWelcome(w);
         resolve();
+        // Reclaim our race seat on every fresh connection (page reload or
+        // socket.io reconnection) as long as we have not joined a room in this
+        // session. The saved token survives the tab closing.
+        const saved = loadRejoin();
+        if (saved && saved.roomId && saved.roomId !== this.roomId) {
+          this.rejoinRoom(saved.roomId, saved.token).then((r) => {
+            if (!r.ok && (r.error === 'rejoin expired' || r.error === 'bad request')) {
+              // Room gone or reservation expired: stop retrying on every reload.
+              localStorage.removeItem(LS_ROOM);
+              this.cb.onRejoinFailed();
+            }
+          });
+        }
       });
       socket.on(NET_EVENTS.snapshot, (snap: WorldSnapshot) => {
         this.lastSnapshot = snap;
         this.cb.onSnapshot(snap);
       });
       socket.on(NET_EVENTS.crash, (msg: CrashMsg) => this.cb.onCrash(msg));
+      socket.on(NET_EVENTS.roomState, (s: RoomStateMsg) => this.cb.onRoomState(s));
+      socket.on(NET_EVENTS.countdown, (m: CountdownMsg) => this.cb.onCountdown(m));
+      socket.on(NET_EVENTS.matchStart, () => this.cb.onMatchStart());
+      socket.on(NET_EVENTS.finish, (m: FinishMsg) => this.cb.onFinish(m));
+      socket.on(NET_EVENTS.matchResult, (m: MatchResultMsg) => this.cb.onMatchResult(m));
+      socket.on(NET_EVENTS.hostChanged, (m: HostChangedMsg) => this.cb.onHostChanged(m));
+      socket.on('disconnect', () => {
+        this.connected = false;
+        this.cb.onDisconnect();
+      });
+      socket.on('connect', () => {
+        this.connected = true;
+      });
+    });
+  }
+
+  createRoom(name: string): Promise<AckResult> {
+    return this.ack(NET_EVENTS.createRoom, { name });
+  }
+
+  joinRoom(code: string, name: string): Promise<AckResult> {
+    return this.ack(NET_EVENTS.joinRoom, { code, name });
+  }
+
+  /** Auto-fill an open session; the server creates an endless room when none exists. */
+  quickJoin(name: string): Promise<AckResult> {
+    return this.ack(NET_EVENTS.quickJoin, { name });
+  }
+
+  rejoinRoom(roomId: string, token: string): Promise<AckResult> {
+    return this.ack(NET_EVENTS.rejoinRoom, { roomId, token });
+  }
+
+  startMatch(settings: RoomSettings): void {
+    this.socket?.emit(NET_EVENTS.startMatch, { settings });
+  }
+
+  rematch(): void {
+    this.socket?.emit(NET_EVENTS.rematch);
+  }
+
+  leaveRoom(): void {
+    this.socket?.emit(NET_EVENTS.leaveRoom);
+    this.roomId = '';
+    localStorage.removeItem(LS_ROOM);
+  }
+
+  /** Joined a room: from now on a dropped connection may rejoin it (45 s). */
+  setRoom(roomId: string): void {
+    this.roomId = roomId;
+    localStorage.setItem(LS_ROOM, JSON.stringify({ roomId }));
+  }
+
+  private ack(event: string, payload: unknown): Promise<AckResult> {
+    const socket = this.socket;
+    if (!socket || !socket.connected) return Promise.resolve({ ok: false, error: 'not connected' });
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve({ ok: false, error: 'no reply' });
+      }, 4000);
+      socket.emit(event, payload, (r: AckResult | undefined) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        const res = r ?? { ok: false, error: 'no reply' };
+        if (res.ok && res.token) {
+          this.token = res.token;
+          localStorage.setItem(LS_TOKEN, this.token);
+        }
+        if (res.ok && res.playerId && res.roomId) {
+          this.playerId = res.playerId;
+          this.setRoom(res.roomId);
+        }
+        resolve(res);
+      });
     });
   }
 
@@ -105,5 +222,18 @@ export class Net {
   disconnect(): void {
     this.socket?.disconnect();
     this.socket = null;
+  }
+}
+
+function loadRejoin(): { roomId: string; token: string } | null {
+  const roomRaw = localStorage.getItem(LS_ROOM);
+  const token = localStorage.getItem(LS_TOKEN);
+  if (!roomRaw || !token) return null;
+  try {
+    const room = JSON.parse(roomRaw) as { roomId?: string };
+    if (!room.roomId) return null;
+    return { roomId: room.roomId, token };
+  } catch {
+    return null;
   }
 }

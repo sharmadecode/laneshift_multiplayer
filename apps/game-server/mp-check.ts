@@ -1,6 +1,6 @@
-import { io } from 'socket.io-client';
 import { PLAYER_MAX_SPEED } from '@hr/shared';
 import { createVehicle, stepPlayer, type InputState } from '@hr/simulation';
+import { joinRoom, mkSocket, waitMatchStart } from './room-flow.js';
 
 // Mirrors the client's grid-stepped prediction (Game.ts): the local car is
 // stepped only on the server's 30 Hz tick grid (phase-anchored to snapshots),
@@ -8,7 +8,7 @@ import { createVehicle, stepPlayer, type InputState } from '@hr/simulation';
 const TICK_MS = 1000 / 30;
 const FRAME_MS = 1000 / 60;
 
-const sock = io('http://localhost:5200', { transports: ['websocket'] });
+const sock = mkSocket();
 let myId = '';
 const sim = createVehicle(); // grid state (player.state on the client)
 const prev = { x: 0, speed: 0, distance: 0, steering: 0 }; // state after previous grid step
@@ -29,8 +29,10 @@ let maxOffsetDist = 0;
 let safetyNetTriggers = 0;
 let snapshots = 0;
 let trackedPrev = false;
+let started = false;
+let nextSendAt = 0;
 
-sock.on('welcome', (w) => (myId = w.playerId));
+sock.on('welcome', () => undefined);
 
 sock.on('snap', (snap) => {
   const me = snap.players.find((p) => p.id === myId);
@@ -94,6 +96,7 @@ setInterval(() => {
 }, 5);
 
 function runFrame(): void {
+  if (!started) return; // the grid must not run during lobby/countdown
   const steer: -1 | 0 | 1 = (Math.sin(frames * FRAME_MS * 0.001 * 1.3) > 0.6
     ? 1
     : Math.sin(frames * FRAME_MS * 0.001 * 1.3) < -0.6
@@ -136,20 +139,23 @@ function runFrame(): void {
   frames++;
 }
 
-// 30 Hz input send (verbatim Net.sendInput cadence, phase-locked to snapshots)
-let nextSendAt = 0;
-setInterval(() => {
-  if (!sock.connected) return;
-  const now = Date.now();
-  if (now < nextSendAt) return;
-  nextSendAt = now + 1000 / 30;
-  const msg = { ...latestInput, seq: nextSeq++ };
-  pendingInputs.push(msg);
-  lastSent = msg;
-  sock.emit('in', msg);
-}, 4);
+// 30 Hz input send (verbatim Net.sendInput cadence, phase-locked to snapshots).
+// Started only after the match begins: lobby/countdown inputs are dropped
+// server-side and would pollute the prediction baseline.
+function startInputLoop(): void {
+  setInterval(() => {
+    if (!sock.connected) return;
+    const now = Date.now();
+    if (now < nextSendAt) return;
+    nextSendAt = now + 1000 / 30;
+    const msg = { ...latestInput, seq: nextSeq++ };
+    pendingInputs.push(msg);
+    lastSent = msg;
+    sock.emit('in', msg);
+  }, 4);
+}
 
-setTimeout(() => {
+function finish(): void {
   const smoothFrameX = (PLAYER_MAX_SPEED * FRAME_MS) / 1000; // 0.97 m/frame at top speed
   console.log(`snapshots: ${snapshots}`);
   console.log(`max rendered frame delta: x=${maxFrameDeltaX.toFixed(3)} m, distance=${maxFrameDeltaDist.toFixed(3)} m`);
@@ -169,4 +175,19 @@ setTimeout(() => {
       : 'FAIL: jitter or divergence detected'
   );
   process.exit(ok ? 0 : 1);
-}, 8000);
+}
+
+async function main(): Promise<void> {
+  const j = await joinRoom(sock, 'mp-check');
+  myId = j.playerId;
+  await waitMatchStart(sock, { mode: 'endless', density: 0.8 });
+  started = true;
+  nextSendAt = Date.now();
+  startInputLoop();
+  setTimeout(finish, 8000);
+}
+
+main().catch((err) => {
+  console.error(`FAIL: ${err.message}`);
+  process.exit(1);
+});

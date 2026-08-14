@@ -91,5 +91,4 @@ function respawn(v: VehicleState): void {
   v.ghost = true;
   v.ghostTimer = GHOST_TIME;
   v.speed = START_SPEED * 0.6;
-  v.x = 0;
 }

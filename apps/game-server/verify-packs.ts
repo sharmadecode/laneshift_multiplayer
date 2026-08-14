@@ -1,4 +1,5 @@
-import { io, type Socket } from 'socket.io-client';
+import { type Socket } from 'socket.io-client';
+import { joinRoom, mkSocket, waitMatchStart } from './room-flow.js';
 
 // Multi-anchor traffic acceptance (pack rule set from PLAN):
 //  A drives for the whole window; B parks for 12 s, then throttles.
@@ -9,9 +10,11 @@ import { io, type Socket } from 'socket.io-client';
 //      [B, B+430]
 //   3. no overlaps: every snapshot, same-lane cars keep >= 10 m spacing
 //      (the only visible flicker source during pack merges)
-//   4. bounds: car count never exceeds 60 and no non-finite roadDist
-//   5. parity: same-tick snapshots from A and B carry identical traffic
-const URL = 'http://localhost:5200';
+//   4. corridor honesty: adjacent-lane cars whose collision boxes overlap
+//      must also look overlapped (model gap <= 0); a visible gap may only
+//      exist when the corridor is genuinely passable (box pair clear)
+//   5. bounds: car count never exceeds 60 and no non-finite roadDist
+//   6. parity: same-tick snapshots from A and B carry identical traffic
 
 interface SnapLike {
   tick: number;
@@ -34,9 +37,8 @@ interface Tracker {
 }
 
 function mkClient(tag: string, steerEvery: number, script: (n: number, t: number) => { steering: -1 | 0 | 1; throttle: number; brake: number }): Tracker {
-  const s = io(URL, { transports: ['websocket'] });
+  const s = mkSocket();
   const tr: Tracker = { id: '', s, count: 0, byTick: new Map(), lastSnap: null, steerEvery, steerN: 0 };
-  s.on('welcome', (w: { playerId: string }) => (tr.id = w.playerId));
   s.on('snap', (snap: SnapLike) => {
     tr.count++;
     tr.lastSnap = snap;
@@ -81,8 +83,10 @@ let bWasParked = false;
 let bResumeSpeedAt = 0; // elapsed s when B first exceeds 5 m/s after the park
 let bSeedLatencyMs: number | null = null;
 let overlapViolations = 0;
+let corridorViolations = 0;
 let maxCount = 0;
 let nonFinite = 0;
+let bParkWindowSeen = false;
 
 a.s.on('snap', (snap: SnapLike) => {
   const me = snap.players.find((p) => p.id === a.id);
@@ -102,8 +106,29 @@ a.s.on('snap', (snap: SnapLike) => {
     }
   }
 
+  // corridor honesty between adjacent lanes: TRAFFIC_LANE_DRIFT = 0.8 keeps
+  // adjacent centers >= 2.9 m apart, above the max box-pair threshold 2.805
+  // (COLLISION_SCALE = 0.72, widths up to 1.995), so a visible gap is always
+  // genuinely passable. Flag any pair inside the old blocked-but-gapped band
+  // (models apart but boxes overlapping) as a regression guard.
+  const boxLanePairs: Array<[number, number]> = [
+    [-1, 0],
+    [0, 1]
+  ];
+  for (const [l1, l2] of boxLanePairs) {
+    const c1 = snap.traffic.filter((c) => c.lane === l1);
+    const c2 = snap.traffic.filter((c) => c.lane === l2);
+    for (const a of c1) {
+      for (const b of c2) {
+        const dx = Math.abs(a.x - b.x);
+        if (dx >= 1.9 && dx < 2.736) corridorViolations++;
+      }
+    }
+  }
+
   const parked = !bPlayer.crashed && bPlayer.speed < 2 && elapsed() > 14 && elapsed() < 24;
   if (parked) {
+    bParkWindowSeen = true;
     bWasParked = true;
     const inWindow = snap.traffic.filter((c) => c.roadDist > me.distance && c.roadDist < me.distance + 700).length;
     minCarsWhileBParked = Math.min(minCarsWhileBParked, inWindow);
@@ -133,9 +158,10 @@ setTimeout(() => {
 
   const dur = elapsed();
   console.log(`A: ${a.count} snapshots (${(a.count / dur).toFixed(1)}/s), B: ${b.count} snapshots (${(b.count / dur).toFixed(1)}/s)`);
-  console.log(`no starvation while B parked: min cars in A window = ${minCarsWhileBParked === Infinity ? 'n/a' : minCarsWhileBParked}, fails = ${starvationFails}`);
+  console.log(`no starvation while B parked: min cars in A window = ${minCarsWhileBParked === Infinity ? 'n/a' : minCarsWhileBParked}, fails = ${starvationFails} (park window seen: ${bParkWindowSeen})`);
   console.log(`B resume seed latency: ${bSeedLatencyMs === null ? 'never seeded!' : bSeedLatencyMs + ' ms'} (B resumed moving at ${bResumeSpeedAt.toFixed(1)}s)`);
   console.log(`overlap violations (same-lane gap < 10 m): ${overlapViolations}`);
+  console.log(`corridor violations (adjacent pair blocked but visually gapped): ${corridorViolations}`);
   console.log(`bounds: max cars = ${maxCount} (limit 60), non-finite positions = ${nonFinite}`);
   console.log(`traffic parity: ${compared} same-tick comparisons, mismatches = ${mismatches}`);
   const ok =
@@ -144,11 +170,25 @@ setTimeout(() => {
     bSeedLatencyMs !== null &&
     bSeedLatencyMs <= 2000 &&
     overlapViolations === 0 &&
+    corridorViolations === 0 &&
     maxCount <= 60 &&
     nonFinite === 0 &&
     mismatches === 0;
-  console.log(ok ? 'PASS: multi-anchor traffic (no starvation, instant seed, no overlaps)' : 'FAIL: multi-anchor traffic');
+  console.log(ok ? 'PASS: multi-anchor traffic (no starvation, instant seed, no overlaps, honest corridors)' : 'FAIL: multi-anchor traffic');
   a.s.close();
   b.s.close();
   process.exit(ok ? 0 : 1);
 }, 36000);
+
+async function main(): Promise<void> {
+  const ja = await joinRoom(a.s, 'verify-A');
+  a.id = ja.playerId;
+  const jb = await joinRoom(b.s, 'verify-B', ja.roomId);
+  b.id = jb.playerId;
+  await waitMatchStart(a.s, { mode: 'endless', density: 0.8 });
+}
+
+main().catch((err) => {
+  console.error(`FAIL: ${err.message}`);
+  process.exit(1);
+});

@@ -36,7 +36,7 @@ export const TRAFFIC_BASE_GAP = 55; // meters between cars in the same lane
 export const TRAFFIC_GAP_JITTER = 22;
 export const TRAFFIC_FOLLOW_GAP = 14; // min same-lane following distance (m)
 export const TRAFFIC_TAIL_SLOW = 0.8; // extra slowdown factor for dangerously close cars
-export const TRAFFIC_LANE_DRIFT = 0.85; // max lateral drift inside a lane (closes the between-lane dead strip)
+export const TRAFFIC_LANE_DRIFT = 0.8; // max lateral drift inside a lane. Bounded so adjacent-lane cars never block a visible gap: 4.5 - 2*0.8 = 2.9 > max box pair 2.805, i.e. a corridor that looks open is always passable, and one that is blocked always looks blocked (models touch or overlap).
 export const TRAFFIC_DENSITY_MIN = 0.55;
 export const TRAFFIC_DENSITY_MAX = 1.3;
 
@@ -58,7 +58,7 @@ export const GHOST_TIME = 1.2; // no-collision grace after respawn (s)
 // ---- Car collision box (2D) ----
 export const CAR_LENGTH = 4.4;
 export const CAR_WIDTH = 1.9;
-export const COLLISION_SCALE = 0.82; // forgiveness factor
+export const COLLISION_SCALE = 0.72; // forgiveness factor: crash fires only after visible body overlap
 
 // Player lateral clamp — stays inside the outermost lanes so traffic can always collide.
 export const LANE_RANGE = (LANE_COUNT - 1) * (LANE_WIDTH / 2) + LANE_WIDTH / 2 - CAR_WIDTH / 2 - 0.25;

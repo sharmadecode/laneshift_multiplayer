@@ -10,7 +10,7 @@ Online endless 3-lane highway racing game. Browser (desktop + mobile) **and** An
 - Multiplayer: 1–6 friends in a private room (no public matchmaking in v1)
 - Gameplay: high-speed lane cutting through live traffic; two modes:
   - **Endless free drive** (default)
-  - **Distance race**: 5 / 10 / 20 km (host chooses)
+  - **Distance race**: 40 / 60 / 100 km (host chooses)
 - Visual style: polished night city highway, realistic lighting, optimized for mobile
 - Cars: CC0 / unbranded models only — **no real manufacturer logos, names, or ripped game assets**
 
@@ -98,7 +98,7 @@ flowchart LR
 1. Player chooses display name
 2. Host creates room → server generates a 5-character, non-confusing code
 3. Friends join with the code (max 6 players)
-4. Host picks: mode (endless / 5 / 10 / 20 km), traffic density
+4. Host picks: mode (endless / 40 / 60 / 100 km), traffic density
 5. 5-second shared countdown → server starts the match
 6. **Reconnect tokens**: on disconnect, car reserved 45 s; player can return to the same state
 7. Rematch support after finish

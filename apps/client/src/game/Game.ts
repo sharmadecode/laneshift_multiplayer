@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { CRASH_TIME, TICK_RATE, type InputMsg, type WorldSnapshot } from '@hr/shared';
+import { CRASH_TIME, TICK_RATE, type FinishMsg, type InputMsg, type MatchResultMsg, type RoomSettings, type RoomStateMsg, type WorldSnapshot } from '@hr/shared';
 import {
   crash,
   playerHitsTraffic,
@@ -22,6 +22,7 @@ import { EngineAudio } from './Audio';
 import { Net } from './Net';
 
 type Mode = 'start' | 'running' | 'paused';
+type NetPhase = 'none' | 'lobby' | 'countdown' | 'racing' | 'finished';
 
 // A small visual delay gives the client two authoritative snapshots to blend
 // between. It removes packet-to-packet jumps without making friends feel late.
@@ -84,6 +85,10 @@ export class Game {
   // --- multiplayer ---
   private online = false;
   private net: Net | null = null;
+  private netPhase: NetPhase = 'none';
+  private roomMode: RoomSettings['mode'] = 40;
+  private hostId = '';
+  private lastResult: MatchResultMsg | null = null;
   private remotes = new Map<string, THREE.Group>();
   private snapHistory: WorldSnapshot[] = [];
   /** Maps the server's Date.now clock into this client's Date.now clock. */
@@ -121,9 +126,24 @@ export class Game {
       onAutoThrottle: (b) => (this.input.autoThrottle = b),
       onSensitivity: (n) => (this.input.sensitivity = n),
       onSound: (b) => this.audio.setMuted(!b),
-      onStart: () => this.beginRun(),
+      onSolo: () => this.beginSolo(),
+      onQuickJoin: () => this.quickJoin(),
+      onCreateRoom: () => this.createRoom(),
+      onJoinRoom: (code) => this.joinRoom(code),
+      onLeaveRoom: () => {
+        this.net?.leaveRoom();
+        this.enterMenu();
+      },
+      onStartMatch: (settings) => this.net?.startMatch(settings),
+      onRematch: () => this.net?.rematch(),
+      onToMenu: () => {
+        this.net?.leaveRoom();
+        this.enterMenu();
+      },
       onPauseToggle: () => this.togglePause(),
-      onRestart: () => this.restart()
+      onRestart: () => {
+        if (!this.online) this.restart();
+      }
     });
 
     this.input = new Input(this.hud.steerLeftBtn, this.hud.steerRightBtn, this.hud.brakeBtn, this.hud.throttleBtn, {
@@ -137,8 +157,6 @@ export class Game {
     window.addEventListener('keydown', (e) => {
       if ((e.code === 'KeyP' || e.code === 'Escape') && this.mode !== 'start') {
         this.togglePause();
-      } else if (this.mode === 'start' && !e.repeat) {
-        this.beginRun();
       }
     });
 
@@ -171,6 +189,104 @@ export class Game {
     this.audio.setMuted(!this.hud.sound);
     this.hud.startGame();
     this.mode = 'running';
+  }
+
+  /** SOLO RACE: a solo run is fully offline — drop the socket so no stray inputs fly. */
+  private beginSolo(): void {
+    this.net?.disconnect();
+    this.net = null;
+    this.online = false;
+    this.netPhase = 'none';
+    this.beginRun();
+  }
+
+  private enterMenu(): void {
+    this.mode = 'start';
+    this.netPhase = 'none';
+    this.hud.showMenu();
+    this.player.reset();
+    this.hud.resetRun();
+    this.serverCrashed = false;
+  }
+
+  private createRoom(): void {
+    this.net?.createRoom(this.hud.name).then((r) => {
+      if (!r.ok) this.hud.menuError(r.error ?? 'failed to create room');
+    });
+  }
+
+  /** Auto-fill an open session; the server starts a fresh endless room when none exists. */
+  private quickJoin(): void {
+    this.net?.quickJoin(this.hud.name).then((r) => {
+      if (!r.ok) this.hud.menuError(r.error ?? 'quick join failed');
+    });
+  }
+
+  private joinRoom(code: string): void {
+    this.net?.joinRoom(code, this.hud.name).then((r) => {
+      if (!r.ok) this.hud.menuError(r.error ?? 'failed to join room');
+    });
+  }
+
+  /** Fresh match (matchStart) or mid-race rejoin (roomState racing). */
+  private startRaceFlow(resetCar: boolean): void {
+    if (resetCar) {
+      this.player.reset();
+      this.hud.resetRun();
+      this.pendingInputs.length = 0;
+      this.latestSentInput = null;
+      this.prevGrid = null;
+      this.visualCorrection = { x: 0, speed: 0, distance: 0, steering: 0 };
+      this.snapHistory.length = 0;
+      this.serverCrashed = false;
+      this.wasCrashed = false;
+      this.lastResult = null;
+    }
+    this.audio.init();
+    this.audio.setMuted(!this.hud.sound);
+    this.hud.startGame();
+    this.hud.hideCountdown();
+    this.hud.hideFinish();
+    this.hud.hideResult();
+    this.mode = 'running';
+    this.netPhase = 'racing';
+  }
+
+  private onRoomState(state: RoomStateMsg): void {
+    if (!this.net) return;
+    this.hud.myPlayerId = this.net.playerId;
+    this.hostId = state.hostId;
+    this.roomMode = state.settings.mode;
+    this.hud.setReconnecting(false);
+    switch (state.phase) {
+      case 'lobby':
+        this.hud.showLobby(state);
+        this.netPhase = 'lobby';
+        break;
+      case 'countdown':
+        // The lobby card would cover the countdown number (higher z-index);
+        // players already in the race don't need it for 5 seconds.
+        this.hud.hideLobby();
+        this.hud.showCountdown(state.countdownT);
+        this.netPhase = 'countdown';
+        break;
+      case 'racing':
+        if (this.netPhase !== 'racing') this.startRaceFlow(false);
+        break;
+      case 'finished':
+        if (this.netPhase !== 'finished' && this.lastResult) {
+          this.netPhase = 'finished';
+          this.hud.showResult(this.lastResult, this.hostId === this.net.playerId);
+        }
+        break;
+    }
+  }
+
+  private onMatchResult(result: MatchResultMsg): void {
+    this.lastResult = result;
+    this.netPhase = 'finished';
+    this.hud.hideFinish();
+    this.hud.showResult(result, this.hostId === this.net?.playerId);
   }
 
   private togglePause(): void {
@@ -265,6 +381,7 @@ export class Game {
       this.syncRemotes(dt);
       this.player.syncVisuals(dt, r);
       this.updateBursts(dt);
+      this.updateRaceMeta();
       this.hud.update({ speed: r.speed, distance: r.distance });
       return;
     }
@@ -289,6 +406,18 @@ export class Game {
     this.hud.update({ speed: s.speed, distance: s.distance });
   }
 
+  private updateRaceMeta(): void {
+    const snap = this.net?.lastSnapshot;
+    const me = snap?.players.find((p) => p.id === this.net?.playerId);
+    if (!snap || !me) return;
+    const rank = 1 + snap.players.filter((p) => p.id !== me.id && p.distance > me.distance).length;
+    const chip =
+      this.roomMode === 'endless'
+        ? 'ENDLESS'
+        : `${Math.min(me.distance / 1000, this.roomMode).toFixed(1)}/${this.roomMode} km`;
+    this.hud.setMeta(chip, rank);
+  }
+
   private predictedRenderState(): Pick<VehicleState, 'x' | 'speed' | 'distance' | 'steering'> {
     const s = this.player.state;
     const u = Math.min(1, this.gridAccum / this.gridStepMs);
@@ -308,7 +437,23 @@ export class Game {
       onWelcome: () => {
         this.net = net;
         this.online = true;
-        this.hud.setNet('ONLINE \u00b7 1', true);
+        this.hud.setNet('ONLINE', true);
+        this.hud.showMenu();
+      },
+      onRoomState: (s) => this.onRoomState(s),
+      onCountdown: (m) => this.hud.showCountdown(m.t),
+      onMatchStart: () => this.startRaceFlow(true),
+      onFinish: (m) => {
+        if (m.playerId === this.net?.playerId) this.hud.showFinish(m);
+      },
+      onMatchResult: (m) => this.onMatchResult(m),
+      onHostChanged: () => undefined, // roomState always follows hostChanged
+      onDisconnect: () => this.hud.setReconnecting(true),
+      onRejoinFailed: () => {
+        this.online = false;
+        this.hud.setNet('OFFLINE', false);
+        this.hud.setReconnecting(false);
+        this.enterMenu();
       }
     });
     net.connect().catch(() => {
@@ -448,10 +593,13 @@ export class Game {
         this.audio.crash();
         this.hud.showCrash(this.player.state.crashTimer);
       }
+      // Burst at our own rendered car: msg.x is the traffic car's x, up to
+      // a meter away laterally, which looks like a phantom hit.
+      this.spawnBurstAt(this.player.state.x, 0);
     } else {
       this.audio.crash();
+      this.spawnBurstAt(msg.x, 0);
     }
-    this.spawnBurstAt(msg.x, 0);
   }
 
   private ensureRemoteMeshes(snap: WorldSnapshot): void {
