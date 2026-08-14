@@ -90,7 +90,7 @@ export class TrafficSpawner {
 
     if (!this.initialised) {
       for (let l = 0; l < LANE_COUNT; l++) {
-        this.nextSpawn[l] = lead + TRAFFIC_AHEAD_WINDOW * 0.25 + this.rng() * TRAFFIC_AHEAD_WINDOW * 0.75;
+        this.nextSpawn[l] = lead + TRAFFIC_AHEAD_WINDOW * 0.6 + this.rng() * TRAFFIC_AHEAD_WINDOW * 0.4;
         this.spawnAhead(l);
       }
       this.initialised = true;

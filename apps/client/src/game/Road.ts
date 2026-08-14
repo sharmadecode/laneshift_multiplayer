@@ -515,11 +515,17 @@ export class Road {
       }
     }
 
+    houseMesh1.count = sHouses1.length;
+    houseMesh2.count = sHouses2.length;
+    houseMesh3.count = sHouses3.length;
+    roofMesh.count = sRoofs.length;
+    vendMesh.count = sVends.length;
+
     houseMesh1.instanceMatrix.needsUpdate = true;
     houseMesh2.instanceMatrix.needsUpdate = true;
     houseMesh3.instanceMatrix.needsUpdate = true;
     roofMesh.instanceMatrix.needsUpdate = true;
-    roofMesh.instanceColor!.needsUpdate = true;
+    if (roofMesh.instanceColor) roofMesh.instanceColor.needsUpdate = true;
     vendMesh.instanceMatrix.needsUpdate = true;
 
     this.scrollers.push(
@@ -620,12 +626,18 @@ export class Road {
       }
     }
 
+    oakMesh.count = sOak.length;
+    oakTrunkMesh.count = sOakTrunk.length;
+    pineMesh.count = sPine.length;
+    pineTrunkMesh.count = sPineTrunk.length;
+    bushMesh.count = sBush.length;
+
     oakMesh.instanceMatrix.needsUpdate = true;
     oakTrunkMesh.instanceMatrix.needsUpdate = true;
-    oakMesh.instanceColor!.needsUpdate = true;
+    if (oakMesh.instanceColor) oakMesh.instanceColor.needsUpdate = true;
     pineMesh.instanceMatrix.needsUpdate = true;
     pineTrunkMesh.instanceMatrix.needsUpdate = true;
-    pineMesh.instanceColor!.needsUpdate = true;
+    if (pineMesh.instanceColor) pineMesh.instanceColor.needsUpdate = true;
     bushMesh.instanceMatrix.needsUpdate = true;
 
     this.scrollers.push(
