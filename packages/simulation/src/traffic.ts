@@ -76,7 +76,7 @@ export class TrafficSpawner {
   }
 
   /** Advances traffic simulation by dt, following the leading active racer. */
-  update(racers: Array<{ distance: number; active: boolean }>, dt: number): void {
+  update(racers: Array<{ distance: number; active: boolean }>, dt: number, speedMultiplier = 1.0): void {
     if (!racers.length) return;
     const active = racers.filter((r) => r.active);
     const tracked = active.length ? active : racers;
@@ -91,14 +91,14 @@ export class TrafficSpawner {
     if (!this.initialised) {
       for (let l = 0; l < LANE_COUNT; l++) {
         this.nextSpawn[l] = lead + TRAFFIC_AHEAD_WINDOW * 0.6 + this.rng() * TRAFFIC_AHEAD_WINDOW * 0.4;
-        this.spawnAhead(l);
+        this.spawnAhead(l, speedMultiplier);
       }
       this.initialised = true;
     }
 
     for (let i = this.cars.length - 1; i >= 0; i--) {
       const c = this.cars[i];
-      c.roadDist += c.speed * dt;
+      c.roadDist += c.speed * dt * speedMultiplier;
       if (
         trail - c.roadDist > TRAFFIC_REAR_WINDOW ||
         c.roadDist - lead > TRAFFIC_AHEAD_WINDOW + 300
@@ -139,13 +139,13 @@ export class TrafficSpawner {
       );
       if (this.nextSpawn[l] < minSpawn) this.nextSpawn[l] = minSpawn;
       while (this.cars.length < this.maxCars() && this.nextSpawn[l] - lead < TRAFFIC_AHEAD_WINDOW) {
-        this.spawnAhead(l);
+        this.spawnAhead(l, speedMultiplier);
       }
     }
   }
 
   /** Seeds a traffic pack ahead of a trailing or rejoining racer without overlap. */
-  seedPack(distance: number): void {
+  seedPack(distance: number, speedMultiplier = 1.0): void {
     const far = distance + TRAFFIC_AHEAD_WINDOW;
     const start = distance + TRAFFIC_PACK_NEAREST;
     for (let l = 0; l < LANE_COUNT; l++) {
@@ -168,7 +168,7 @@ export class TrafficSpawner {
         pos < far &&
         this.cars.length < this.maxCars()
       ) {
-        this.pushCar(l, pos);
+        this.pushCar(l, pos, speedMultiplier);
         pos += TRAFFIC_BASE_GAP * (0.9 + this.rng() * 0.4) * (1.2 - 0.4 * this.density);
         placed++;
       }
@@ -186,7 +186,7 @@ export class TrafficSpawner {
     }
   }
 
-  private pushCar(laneIndex: number, roadDist: number): void {
+  private pushCar(laneIndex: number, roadDist: number, speedMultiplier = 1.0): void {
     const modelIndex = Math.floor(this.rng() * 18);
     // Authentic speed profiles across 18 unique vehicle archetypes
     let minSpd = TRAFFIC_SPEED_MIN;
@@ -247,7 +247,7 @@ export class TrafficSpawner {
       minSpd = 19.0; maxSpd = 23.0;
     }
 
-    const speed = minSpd + this.rng() * (maxSpd - minSpd);
+    const speed = (minSpd + this.rng() * (maxSpd - minSpd)) * speedMultiplier;
     const isBig = modelIndex === 10 || modelIndex === 16 || modelIndex === 17;
     const isSport = modelIndex <= 8;
     this.cars.push({
@@ -263,10 +263,10 @@ export class TrafficSpawner {
     });
   }
 
-  private spawnAhead(laneIndex: number): void {
+  private spawnAhead(laneIndex: number, speedMultiplier = 1.0): void {
     const gap = (TRAFFIC_BASE_GAP + this.rng() * TRAFFIC_GAP_JITTER) * (1.2 - 0.4 * this.density);
     const roadDist = this.nextSpawn[laneIndex];
-    this.pushCar(laneIndex, roadDist);
+    this.pushCar(laneIndex, roadDist, speedMultiplier);
     this.nextSpawn[laneIndex] = roadDist + gap;
   }
 }

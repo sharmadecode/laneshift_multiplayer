@@ -29,6 +29,7 @@ import {
   TrafficSpawner,
   crash,
   createVehicle,
+  getWeatherSpeedMultiplier,
   playerHitsTraffic,
   stepPlayer,
   type VehicleState
@@ -249,7 +250,8 @@ export class Room {
 
     const racers: Array<{ distance: number; active: boolean }> = [];
     for (const p of this.players.values()) {
-      stepPlayer(p.state, p.input, dt);
+      const speedMult = getWeatherSpeedMultiplier(p.state.distance, 3000, this.settings.seed);
+      stepPlayer(p.state, p.input, dt, speedMult);
       p.appliedSeq = p.receivedSeq;
       if (p.state.speed > PLAYER_ACTIVE_SPEED) {
         p.inactiveFor = 0;
@@ -262,7 +264,9 @@ export class Room {
       racers.push({ distance: p.state.distance, active: p.active });
     }
 
-    this.spawner.update(racers, dt);
+    const leadDist = racers.length ? Math.max(...racers.map((r) => r.distance)) : 0;
+    const trafficSpeedMult = getWeatherSpeedMultiplier(leadDist, 3000, this.settings.seed);
+    this.spawner.update(racers, dt, trafficSpeedMult);
 
     const front = this.spawner.front;
     const now = Date.now();
@@ -270,7 +274,7 @@ export class Room {
       if (!p.active) continue;
       if (p.state.distance + TRAFFIC_PACK_STRANDED >= front) continue;
       if (now - p.lastPackSeed < TRAFFIC_PACK_COOLDOWN_MS) continue;
-      this.spawner.seedPack(p.state.distance);
+      this.spawner.seedPack(p.state.distance, trafficSpeedMult);
       p.lastPackSeed = now;
     }
 

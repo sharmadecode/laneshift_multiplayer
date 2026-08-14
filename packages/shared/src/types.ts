@@ -9,6 +9,7 @@ export interface RoomSettings {
   mode: RoomMode;
   /** Traffic density 0.55..1.3 (spawner multiplier). */
   density: number;
+  seed?: number;
 }
 
 export interface LobbyPlayer {

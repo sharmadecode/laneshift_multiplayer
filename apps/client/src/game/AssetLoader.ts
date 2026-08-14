@@ -140,7 +140,7 @@ export class AssetLoader {
       car.userData.bodyMaterial = bodyMat;
       this.heroCarTemplate = car;
 
-      // 2. Preload Traffic Vehicles (8 distinct curated models)
+      // 2. Preload Traffic Vehicles (12 distinct curated models)
       const trafficModelPaths = [
         { path: '/models/Nissan-GTR.glb', length: 4.65 },
         { path: '/models/quaternius-sports-car.glb', length: 4.5 },
@@ -149,7 +149,12 @@ export class AssetLoader {
         { path: '/models/toyota-ae86.glb', length: 4.3 },
         { path: '/models/white-sports-convertible.glb', length: 4.4 },
         { path: '/models/car-sedan-01.glb', length: 4.5 },
-        { path: '/models/quaternius-suv.glb', length: 4.8 }
+        { path: '/models/quaternius-suv.glb', length: 4.8 },
+        { path: '/models/Ambulance.glb', length: 5.2 },
+        { path: '/models/Convertible.glb', length: 4.5 },
+        { path: '/models/SUV.glb', length: 4.8 },
+        { path: '/models/suv-minivan.glb', length: 4.9 },
+        { path: '/models/metropolis-taxi-01.glb', length: 4.5 }
       ];
 
       for (const item of trafficModelPaths) {
@@ -179,7 +184,7 @@ export class AssetLoader {
             bodyMeshes
           });
         } catch {
-          // Graceful fallback
+          // Skip
         }
       }
 
@@ -188,8 +193,13 @@ export class AssetLoader {
         { path: '/models/glass-skyscraper-01.glb', height: 110 },
         { path: '/models/glass-supertall-01.glb', height: 145 },
         { path: '/models/Skyscraper.glb', height: 120 },
+        { path: '/models/Skyscraper-BwEXdOoUSO.glb', height: 105 },
+        { path: '/models/Apartment-building.glb', height: 85 },
+        { path: '/models/Hotel-Building.glb', height: 65 },
         { path: '/models/TIME-HOTEL-2.10.glb', height: 70 },
-        { path: '/models/Hotel-Building.glb', height: 60 }
+        { path: '/models/midrise-office-01.glb', height: 55 },
+        { path: '/models/waterfront-condo-tower.glb', height: 95 },
+        { path: '/models/Bell-Tower.glb', height: 45 }
       ];
       for (const t of towerPaths) {
         try {
@@ -203,10 +213,15 @@ export class AssetLoader {
       // 4. Preload Suburban Houses & Residential Villas (12m - 18m heights)
       const housePaths = [
         { path: '/models/Two-story-house-9N6ROCbmO1.glb', height: 16.5 },
+        { path: '/models/Two-story-house-QsF9E0PqyN.glb', height: 15.5 },
+        { path: '/models/Two-story-house-hmXhiLDf8D.glb', height: 16.0 },
         { path: '/models/House-with-driveway.glb', height: 15.0 },
         { path: '/models/Town-House.glb', height: 17.0 },
         { path: '/models/bungalow-house.glb', height: 13.5 },
-        { path: '/models/home-cottage-01.glb', height: 14.0 }
+        { path: '/models/ranch-house.glb', height: 13.0 },
+        { path: '/models/farmhouse.glb', height: 14.5 },
+        { path: '/models/home-cottage-01.glb', height: 14.0 },
+        { path: '/models/home-thatched-house-01.glb', height: 13.5 }
       ];
       for (const h of housePaths) {
         try {
@@ -217,13 +232,18 @@ export class AssetLoader {
         }
       }
 
-      // 5. Preload Commercial Stores & Strip Mall Storefronts
+      // 5. Preload Commercial Stores, Cafes & Storefronts
       const shopPaths = [
         { path: '/models/Low-Building.glb', height: 14.0 },
         { path: '/models/convenience-store-01.glb', height: 14.0 },
         { path: '/models/corner-store-01.glb', height: 15.5 },
         { path: '/models/bld-general-store-01.glb', height: 14.5 },
-        { path: '/models/deco-shopfront-row.glb', height: 16.0 }
+        { path: '/models/deco-shopfront-row.glb', height: 16.0 },
+        { path: '/models/retail-podium-01.glb', height: 15.0 },
+        { path: '/models/general-store.glb', height: 14.0 },
+        { path: '/models/Market-Stand.glb', height: 6.5 },
+        { path: '/models/Bar.glb', height: 15.0 },
+        { path: '/models/Blacksmith.glb', height: 13.5 }
       ];
       for (const s of shopPaths) {
         try {
@@ -237,9 +257,13 @@ export class AssetLoader {
       // 6. Preload Farmsteads, Countryside Mills, Windmills & Silos
       const pastoralPaths = [
         { path: '/models/big-red-barn.glb', height: 18.5 },
+        { path: '/models/Big-Barn.glb', height: 19.0 },
+        { path: '/models/Barn.glb', height: 17.5 },
         { path: '/models/Tower-Windmill.glb', height: 26.0 },
         { path: '/models/Silo.glb', height: 24.0 },
-        { path: '/models/Mill.glb', height: 20.0 }
+        { path: '/models/Mill.glb', height: 20.0 },
+        { path: '/models/ChickenCoop.glb', height: 8.5 },
+        { path: '/models/Ferris-wheel.glb', height: 32.0 }
       ];
       for (const p of pastoralPaths) {
         try {
@@ -253,10 +277,14 @@ export class AssetLoader {
       // 7. Preload Countryside Railway Trains & Wagons
       const railwayPaths = [
         { path: '/models/diesel-locomotive.glb', height: 7.5 },
+        { path: '/models/loco-tender.glb', height: 6.5 },
         { path: '/models/passenger-coach.glb', height: 7.0 },
         { path: '/models/mail-coach.glb', height: 7.0 },
         { path: '/models/container-flat-wagon.glb', height: 6.2 },
-        { path: '/models/open-coal-wagon.glb', height: 5.2 }
+        { path: '/models/cattle-wagon.glb', height: 6.2 },
+        { path: '/models/open-coal-wagon.glb', height: 5.2 },
+        { path: '/models/flatbed-wagon.glb', height: 4.8 },
+        { path: '/models/freight-van.glb', height: 6.5 }
       ];
       for (const r of railwayPaths) {
         try {
@@ -270,7 +298,7 @@ export class AssetLoader {
       this.isLoaded = true;
       for (const cb of this.loadCallbacks) cb();
       this.loadCallbacks = [];
-      console.log(`[AssetLoader] Preloaded lean model fleet: ${this.trafficTemplates.length} cars, ${this.towers.length} towers, ${this.houses.length} houses, ${this.shops.length} shops, ${this.pastoralProps.length} pastoral, ${this.railwayCars.length} railway wagons.`);
+      console.log(`[AssetLoader] Preloaded full fleet: ${this.trafficTemplates.length} cars, ${this.towers.length} towers, ${this.houses.length} houses, ${this.shops.length} shops, ${this.pastoralProps.length} pastoral, ${this.railwayCars.length} railway wagons.`);
     } catch (err) {
       console.warn('[AssetLoader] Error preloading GLB assets:', err);
     }

@@ -8,8 +8,7 @@ import {
   LANE_RANGE,
   PLAYER_MAX_SPEED,
   START_SPEED,
-  STEER_RESPONSE,
-  getTrackCurvature
+  STEER_RESPONSE
 } from '@hr/shared';
 
 export interface InputState {
@@ -57,8 +56,31 @@ export function createVehicle(): VehicleState {
   };
 }
 
+export type WeatherType = 'day' | 'sunset' | 'night' | 'rain';
+export const ALL_WEATHERS: WeatherType[] = ['day', 'sunset', 'night', 'rain'];
+
+export function getRandomWeatherForPhase(phase: number, seed = 42): WeatherType {
+  if (phase <= 0) return 'day';
+  let current: WeatherType = 'day';
+  for (let p = 1; p <= phase; p++) {
+    let h = (p * 37 + seed * 997) >>> 0;
+    h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+    h = (h ^ (h >>> 16)) >>> 0;
+    const candidates = ALL_WEATHERS.filter((w) => w !== current);
+    current = candidates[h % candidates.length];
+  }
+  return current;
+}
+
+export function getWeatherSpeedMultiplier(distance: number, weatherInterval = 3000, seed = 42): number {
+  const phase = Math.floor(distance / weatherInterval);
+  const weather = getRandomWeatherForPhase(phase, seed);
+  return weather === 'rain' ? 1.35 : 1.0;
+}
+
 /** Realistic vehicle physics step with suspension spring dynamics, gear transmission & tire grip. */
-export function stepPlayer(v: VehicleState, input: InputState, dt: number): VehicleState {
+export function stepPlayer(v: VehicleState, input: InputState, dt: number, speedMultiplier = 1.0): VehicleState {
   if (v.crashed) {
     v.crashTimer -= dt;
     v.rpm = Math.max(800, v.rpm - 3000 * dt);
@@ -69,20 +91,23 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
     return v;
   }
 
+  const effectiveMaxSpeed = PLAYER_MAX_SPEED * speedMultiplier;
+  const effectiveAccel = ACCELERATION * speedMultiplier;
+
   // --- 1. Longitudinal Acceleration with Powerband Torque ---
   let targetAccel = 0;
   if (input.brake > 0) {
     targetAccel = -BRAKE_DECEL * input.brake;
     v.speed = Math.max(0, v.speed + targetAccel * dt);
   } else if (input.throttle > 0) {
-    if (v.speed < PLAYER_MAX_SPEED) {
+    if (v.speed < effectiveMaxSpeed) {
       // High-speed aerodynamic resistance + torque curve
-      const speedRatio = v.speed / PLAYER_MAX_SPEED;
+      const speedRatio = v.speed / effectiveMaxSpeed;
       const powerMult = Math.max(0.35, 1.0 - 0.55 * Math.pow(speedRatio, 1.4));
-      targetAccel = ACCELERATION * input.throttle * powerMult;
-      v.speed = Math.min(PLAYER_MAX_SPEED, v.speed + targetAccel * dt);
+      targetAccel = effectiveAccel * input.throttle * powerMult;
+      v.speed = Math.min(effectiveMaxSpeed, v.speed + targetAccel * dt);
     } else {
-      v.speed = PLAYER_MAX_SPEED;
+      v.speed = effectiveMaxSpeed;
       targetAccel = 0;
     }
   } else {
@@ -112,22 +137,18 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
   const oldSteer = v.steering;
   v.steering += (targetSteer - v.steering) * k;
 
-  // Responsive arcade lateral control + road curve centrifugal force
+  // Responsive arcade lateral control
   const speedGripFactor = Math.min(1.0, Math.max(0, (v.speed - 1.0) / 4.0));
   const lateralVel = v.steering * LATERAL_SPEED * (0.6 + 0.4 * speedNorm) * speedGripFactor;
 
-  // Centrifugal force gently biases car outward on curves (subtle arcade cornering)
-  const curve = getTrackCurvature(v.distance);
-  const centrifugalForce = -curve * Math.pow(speedNorm, 1.2) * 1.2;
-
-  v.x += (lateralVel + centrifugalForce) * dt;
+  v.x += lateralVel * dt;
   if (Math.abs(v.x) > LANE_RANGE) {
     v.x = Math.sign(v.x) * LANE_RANGE;
   }
 
-  // Lateral G-Force calculation reflecting steering + curve inertia
+  // Lateral G-Force calculation reflecting steering
   const steerDelta = (v.steering - oldSteer) / Math.max(0.001, dt);
-  const rawLateralG = (v.steering * (v.speed / 28) + steerDelta * 0.08) + curve * (v.speed / 45);
+  const rawLateralG = v.steering * (v.speed / 28) + steerDelta * 0.08;
   v.lateralG += (rawLateralG - v.lateralG) * (1 - Math.exp(-14 * dt));
 
   // --- 4. Suspension Spring-Damper Dynamics ---

@@ -10,11 +10,13 @@ import {
   type RoomStateMsg
 } from '@hr/shared';
 
+import type { WeatherPreset } from './Road';
+
 export type Preset = 'low' | 'medium' | 'high';
 
 export interface HudCallbacks {
   onPreset: (p: Preset) => void;
-  onWeather?: (w: 'day' | 'sunset' | 'night' | 'rain') => void;
+  onWeather?: (w: WeatherPreset) => void;
   onAutoThrottle: (b: boolean) => void;
   onSensitivity: (n: number) => void;
   onSound: (b: boolean) => void;
@@ -164,6 +166,7 @@ export class Hud {
           <label for="hr-weather">WEATHER &amp; ATMOSPHERE</label>
           <div class="select-wrap">
             <select id="hr-weather">
+              <option value="dynamic" selected>⚡ DYNAMIC (CHANGES EVERY 3KM)</option>
               <option value="day">☀️ CLEAR DAYLIGHT</option>
               <option value="sunset">🌅 SUNSET GOLDEN HOUR</option>
               <option value="night">🌃 CYBERPUNK NIGHT</option>
@@ -478,10 +481,10 @@ export class Hud {
     });
 
     const weatherSel = hud.querySelector('#hr-weather') as HTMLSelectElement;
-    const savedWeather = (localStorage.getItem('hr_weather') || 'day') as 'day' | 'sunset' | 'night' | 'rain';
+    const savedWeather = (localStorage.getItem('hr_weather') || 'dynamic') as WeatherPreset;
     weatherSel.value = savedWeather;
     weatherSel.addEventListener('change', () => {
-      const w = weatherSel.value as 'day' | 'sunset' | 'night' | 'rain';
+      const w = weatherSel.value as WeatherPreset;
       localStorage.setItem('hr_weather', w);
       this.cb.onWeather?.(w);
     });

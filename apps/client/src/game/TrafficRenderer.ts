@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { absZ, type TrafficCar } from '@hr/simulation';
-import { getCurveOffset, getCurveYaw } from '@hr/shared';
 import { createCarMesh } from './CarMesh';
 import { assetLoader } from './AssetLoader';
 
@@ -31,17 +30,17 @@ export class TrafficRenderer {
         }
 
         mesh.traverse((o) => {
-          if (o instanceof THREE.Mesh) o.castShadow = true;
+          if (o instanceof THREE.Mesh) {
+            o.castShadow = true;
+          }
         });
         this.scene.add(mesh);
         this.pool.set(car.id, mesh);
       }
       mesh.visible = true;
-      const z = absZ(car, playerDist);
-      const curveX = getCurveOffset(playerDist, -z);
-      const curveYaw = getCurveYaw(playerDist, -z);
-      mesh.position.set(car.x + curveX, 0, z);
-      mesh.rotation.y = Math.PI - curveYaw;
+      const relZ = absZ(car, playerDist); // negative value, e.g. -50m
+      mesh.position.set(car.x, 0, relZ);
+      mesh.rotation.y = Math.PI;
       this.used.add(car.id);
     }
 

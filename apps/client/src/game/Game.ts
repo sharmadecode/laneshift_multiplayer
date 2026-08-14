@@ -20,7 +20,7 @@ import {
   type TrafficCar,
   type VehicleState
 } from '@hr/simulation';
-import { Road } from './Road';
+import { Road, type WeatherPreset } from './Road';
 import { Player } from './Player';
 import { TrafficRenderer, TRAFFIC_COLORS } from './TrafficRenderer';
 import { createCarMesh } from './CarMesh';
@@ -161,7 +161,7 @@ export class Game {
       }
     });
 
-    const savedWeather = (localStorage.getItem('hr_weather') || 'day') as 'day' | 'sunset' | 'night' | 'rain';
+    const savedWeather = (localStorage.getItem('hr_weather') || 'dynamic') as WeatherPreset;
     this.road.setWeather(savedWeather);
 
     this.input = new Input(this.hud.steerLeftBtn, this.hud.steerRightBtn, this.hud.brakeBtn, this.hud.throttleBtn, {
@@ -226,6 +226,7 @@ export class Game {
     this.hud.setNet('OFFLINE', false);
     this.player.reset();
     this.hud.resetRun();
+    this.road.setWeatherSeed(Math.floor(Math.random() * 1000000));
     this.spawner.reset(this.density);
     this.beginRun();
   }
@@ -290,6 +291,7 @@ export class Game {
     this.hud.myPlayerId = this.net.playerId;
     this.hostId = state.hostId;
     this.roomMode = state.settings.mode;
+    if (state.settings.seed) this.road.setWeatherSeed(state.settings.seed);
     this.hud.setReconnecting(false);
     switch (state.phase) {
       case 'lobby':
@@ -374,10 +376,11 @@ export class Game {
       }
 
       this.gridAccum += dt * 1000;
+      const speedMult = this.road.getSpeedMultiplier();
       while (this.gridAccum >= this.gridStepMs) {
         this.gridAccum -= this.gridStepMs;
         this.prevGrid = { ...s };
-        stepPlayer(s, input, 1 / TICK_RATE);
+        stepPlayer(s, input, 1 / TICK_RATE, speedMult);
       }
 
       const r = this.predictedRenderState();
@@ -411,8 +414,9 @@ export class Game {
     }
 
     // Offline simulation
-    this.player.update(input, dt);
-    this.spawner.update([{ distance: s.distance, active: true }], dt);
+    const speedMult = this.road.getSpeedMultiplier();
+    this.player.update(input, dt, speedMult);
+    this.spawner.update([{ distance: s.distance, active: true }], dt, speedMult);
 
     if (!s.crashed && !s.ghost) {
       playerHitsTraffic(s.x, this.spawner.cars, s.distance, () => this.onCrash());
@@ -521,7 +525,8 @@ export class Game {
       s.distance = me.distance;
       s.steering = me.steering;
 
-      for (const input of this.pendingInputs) stepPlayer(s, input, 1 / TICK_RATE);
+      const speedMult = this.road.getSpeedMultiplier();
+      for (const input of this.pendingInputs) stepPlayer(s, input, 1 / TICK_RATE, speedMult);
       this.prevGrid = { ...s };
       this.gridAccum = 0;
       this.visualCorrection.x += oldVisualState.x - s.x;

@@ -1,12 +1,5 @@
 import * as THREE from 'three';
-import {
-  LANE_COUNT,
-  LANE_WIDTH,
-  ROAD_HALF_WIDTH,
-  getTrackCurvature,
-  getCurveOffset,
-  getCurveYaw
-} from '@hr/shared';
+import { LANE_COUNT, LANE_WIDTH, ROAD_HALF_WIDTH } from '@hr/shared';
 import { assetLoader } from './AssetLoader';
 
 const ROAD_HALF = ROAD_HALF_WIDTH;
@@ -16,7 +9,8 @@ const GROUND_CENTER = (8 - (GROUND_LEN - 8)) / 2;
 const SCENERY_BACK = 60; // recycle objects when they pass this z
 const SCENERY_PERIOD = 2000; // 5 rich biomes x 400m each
 
-export type WeatherPreset = 'day' | 'sunset' | 'night' | 'rain';
+export type WeatherState = 'day' | 'sunset' | 'night' | 'rain';
+export type WeatherPreset = 'dynamic' | WeatherState;
 
 export interface RoadOptions {
   shadows: boolean;
@@ -27,10 +21,111 @@ export interface RoadOptions {
 interface SceneryProp {
   obj: THREE.Object3D;
   initZ: number;
-  baseX: number;
-  baseRotY: number;
   period: number;
 }
+
+interface WeatherConfig {
+  topColor: THREE.Color;
+  midColor: THREE.Color;
+  horizonColor: THREE.Color;
+  sunColor: THREE.Color;
+  sunDir: THREE.Vector3;
+  starIntensity: number;
+  fogColor: THREE.Color;
+  fogDensity: number;
+  sunLightColor: THREE.Color;
+  sunIntensity: number;
+  hemiColor: THREE.Color;
+  hemiGroundColor: THREE.Color;
+  hemiIntensity: number;
+  asphaltRoughness: number;
+  asphaltMetalness: number;
+  sidewalkRoughness: number;
+  rainAlpha: number;
+}
+
+const WEATHER_PRESETS: Record<WeatherState, WeatherConfig> = {
+  day: {
+    topColor: new THREE.Color(0x0284c7),
+    midColor: new THREE.Color(0x38bdf8),
+    horizonColor: new THREE.Color(0xfef08a),
+    sunColor: new THREE.Color(0xfffbeb),
+    sunDir: new THREE.Vector3(0.52, 0.76, -0.32).normalize(),
+    starIntensity: 0.0,
+    fogColor: new THREE.Color(0xb8e2ff),
+    fogDensity: 0.0018,
+    sunLightColor: new THREE.Color(0xfffbeb),
+    sunIntensity: 1.85,
+    hemiColor: new THREE.Color(0x38bdf8),
+    hemiGroundColor: new THREE.Color(0x22c55e),
+    hemiIntensity: 1.15,
+    asphaltRoughness: 0.45,
+    asphaltMetalness: 0.1,
+    sidewalkRoughness: 0.8,
+    rainAlpha: 0.0
+  },
+  sunset: {
+    topColor: new THREE.Color(0x31103f),
+    midColor: new THREE.Color(0xdb2777),
+    horizonColor: new THREE.Color(0xfbbf24),
+    sunColor: new THREE.Color(0xfef08a),
+    sunDir: new THREE.Vector3(0.75, 0.25, -0.4).normalize(),
+    starIntensity: 0.0,
+    fogColor: new THREE.Color(0xf472b6),
+    fogDensity: 0.0022,
+    sunLightColor: new THREE.Color(0xfb923c),
+    sunIntensity: 1.45,
+    hemiColor: new THREE.Color(0xf472b6),
+    hemiGroundColor: new THREE.Color(0x78350f),
+    hemiIntensity: 0.85,
+    asphaltRoughness: 0.45,
+    asphaltMetalness: 0.1,
+    sidewalkRoughness: 0.75,
+    rainAlpha: 0.0
+  },
+  night: {
+    topColor: new THREE.Color(0x01040a),
+    midColor: new THREE.Color(0x0a0f24),
+    horizonColor: new THREE.Color(0x0f172a),
+    sunColor: new THREE.Color(0xc7d2fe),
+    sunDir: new THREE.Vector3(-0.4, 0.85, -0.3).normalize(),
+    starIntensity: 1.4,
+    fogColor: new THREE.Color(0x030712),
+    fogDensity: 0.0058,
+    sunLightColor: new THREE.Color(0x4338ca),
+    sunIntensity: 0.28,
+    hemiColor: new THREE.Color(0x1e1b4b),
+    hemiGroundColor: new THREE.Color(0x020617),
+    hemiIntensity: 0.22,
+    asphaltRoughness: 0.35,
+    asphaltMetalness: 0.15,
+    sidewalkRoughness: 0.6,
+    rainAlpha: 0.0
+  },
+  rain: {
+    topColor: new THREE.Color(0x1e293b),
+    midColor: new THREE.Color(0x475569),
+    horizonColor: new THREE.Color(0x64748b),
+    sunColor: new THREE.Color(0x94a3b8),
+    sunDir: new THREE.Vector3(0.3, 0.9, -0.2).normalize(),
+    starIntensity: 0.0,
+    fogColor: new THREE.Color(0x334155),
+    fogDensity: 0.0035,
+    sunLightColor: new THREE.Color(0x94a3b8),
+    sunIntensity: 0.75,
+    hemiColor: new THREE.Color(0x334155),
+    hemiGroundColor: new THREE.Color(0x1e293b),
+    hemiIntensity: 0.65,
+    asphaltRoughness: 0.15,
+    asphaltMetalness: 0.35,
+    sidewalkRoughness: 0.3,
+    rainAlpha: 0.75
+  }
+};
+
+import { getRandomWeatherForPhase, type WeatherType } from '@hr/simulation';
+
+const WEATHER_INTERVAL = 3000; // 3km per weather phase
 
 export class Road {
   readonly group = new THREE.Group();
@@ -39,9 +134,6 @@ export class Road {
   private groundTex!: THREE.CanvasTexture;
   private sidewalkTex!: THREE.CanvasTexture;
   private grassTex!: THREE.CanvasTexture;
-  private groundGeo!: THREE.PlaneGeometry;
-  private sidewalkGeos: { geo: THREE.PlaneGeometry; baseOffset: number }[] = [];
-  private terrainGeo!: THREE.PlaneGeometry;
   private scrollers: FastScroller[] = [];
   private sceneryProps: SceneryProp[] = [];
   private dynamicSceneryGroup = new THREE.Group();
@@ -53,8 +145,9 @@ export class Road {
   private asphaltMat!: THREE.MeshStandardMaterial;
   private sidewalkMat!: THREE.MeshStandardMaterial;
   private trainGroup: THREE.Group | null = null;
+  private cloudsGroup = new THREE.Group();
+  private cloudLayers: { mesh: THREE.Object3D; speedX: number; speedZ: number }[] = [];
 
-  /** Radially-tiled 3-band Anime Sky Dome with stylized sun flare and shimmering stars. Fog-immune. */
   private buildSkyDome(scene: THREE.Scene): void {
     const domeGeo = new THREE.SphereGeometry(1, 48, 24);
     this.skyMat = new THREE.ShaderMaterial({
@@ -94,7 +187,6 @@ export class Road {
         void main() {
           float h = clamp(vDir.y * 0.5 + 0.5, 0.0, 1.0);
           
-          // 3-band stylized anime sky gradient
           vec3 sky;
           if (h < 0.45) {
             float t = h / 0.45;
@@ -104,14 +196,12 @@ export class Road {
             sky = mix(midColor, topColor, smoothstep(0.0, 1.0, t));
           }
           
-          // Stylized crisp Anime Sun Disc with halo ring
           float s = max(dot(vDir, sunDir), 0.0);
           float sunDisc = smoothstep(0.994, 0.997, s) * 3.5;
           float sunGlow = pow(s, 24.0) * 0.45 + pow(s, 4.0) * 0.18;
           float sunRing = smoothstep(0.985, 0.988, s) * (1.0 - smoothstep(0.988, 0.993, s)) * 0.6;
           sky += sunColor * (sunDisc + sunGlow + sunRing);
           
-          // Shimmering Anime Stars
           if (starIntensity > 0.01 && vDir.y > 0.04) {
             vec3 grid = floor(vDir * 200.0);
             float n = hash(grid);
@@ -172,7 +262,6 @@ export class Road {
     scene.add(this.sun);
     scene.add(this.sun.target);
 
-    // Highway Ground and Infrastructure
     this.group.add(this.buildPBRHighwaySurface());
     this.group.add(this.buildSidewalkBoulevards());
     this.group.add(this.buildLushMeadowTerrain());
@@ -181,155 +270,177 @@ export class Road {
     this.group.add(this.buildInstancedFoliage());
     this.group.add(this.dynamicSceneryGroup);
     this.group.add(this.buildDistantMountains());
-    this.group.add(this.buildSummerClouds());
+    this.group.add(this.buildLayeredCumulusClouds());
     this.buildRainSystem(scene);
 
     scene.add(this.group);
 
-    // Populate 3D GLB Scenery once assets are loaded
     assetLoader.onReady(() => {
       this.populate3DScenery();
     });
   }
 
+  private rainAlpha = 0;
+
+  getSpeedMultiplier(): number {
+    return 1.0 + (this.rainAlpha || 0) * 0.35;
+  }
+
+  isRaining(): boolean {
+    return (this.rainAlpha || 0) > 0.05;
+  }
+
   private buildRainSystem(scene: THREE.Scene): void {
-    const count = 1200;
+    const count = 2800;
     const pos = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 60;
-      pos[i * 3 + 1] = Math.random() * 35;
-      pos[i * 3 + 2] = -Math.random() * 80 + 15;
+      pos[i * 3] = (Math.random() - 0.5) * 55;
+      pos[i * 3 + 1] = Math.random() * 32;
+      pos[i * 3 + 2] = -Math.random() * 110 + 10;
     }
     this.rainGeo = new THREE.BufferGeometry();
     this.rainGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+
+    // High quality streaked raindrop texture
+    const cv = document.createElement('canvas');
+    cv.width = 16;
+    cv.height = 64;
+    const ctx = cv.getContext('2d')!;
+    const grad = ctx.createLinearGradient(8, 0, 8, 64);
+    grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    grad.addColorStop(0.3, 'rgba(186, 230, 253, 0.45)');
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0.95)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(6, 0, 4, 64);
+    const rainTex = new THREE.CanvasTexture(cv);
+
     const rainMat = new THREE.PointsMaterial({
-      color: 0x93c5fd,
-      size: 0.28,
+      color: 0xbae6fd,
+      size: 0.75,
+      map: rainTex,
       transparent: true,
-      opacity: 0.65,
-      blending: THREE.AdditiveBlending
+      opacity: 0.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
     });
     this.rainPoints = new THREE.Points(this.rainGeo, rainMat);
     this.rainPoints.visible = false;
+    this.rainPoints.renderOrder = 10;
     scene.add(this.rainPoints);
   }
 
+  private isDynamicWeather = true;
+
   setWeather(preset: WeatherPreset): void {
+    if (preset === 'dynamic') {
+      this.isDynamicWeather = true;
+      return;
+    }
+    this.isDynamicWeather = false;
+    this.applyWeatherConfig(WEATHER_PRESETS[preset], WEATHER_PRESETS[preset], 1.0);
+  }
+
+  private applyWeatherConfig(from: WeatherConfig, to: WeatherConfig, t: number): void {
     const u = this.skyMat.uniforms;
-    if (preset === 'sunset') {
-      const fogCol = 0xf472b6;
-      this.sceneRef.background = new THREE.Color(fogCol);
-      this.sceneRef.fog = new THREE.FogExp2(fogCol, 0.0022);
-      u.topColor.value.setHex(0x31103f);
-      u.midColor.value.setHex(0xdb2777);
-      u.horizonColor.value.setHex(0xfbbf24);
-      u.sunColor.value.setHex(0xfef08a);
-      u.sunDir.value.set(0.75, 0.25, -0.4).normalize();
-      u.starIntensity.value = 0.0;
-      this.sun.color.setHex(0xfb923c);
-      this.sun.intensity = 1.45;
-      this.hemi.color.setHex(0xf472b6);
-      this.hemi.groundColor.setHex(0x78350f);
-      this.hemi.intensity = 0.85;
-      if (this.rainPoints) this.rainPoints.visible = false;
-      this.asphaltMat.roughness = 0.45;
-      this.asphaltMat.metalness = 0.1;
-      this.sidewalkMat.roughness = 0.75;
-    } else if (preset === 'night') {
-      const fogCol = 0x0f172a;
-      this.sceneRef.background = new THREE.Color(fogCol);
-      this.sceneRef.fog = new THREE.FogExp2(fogCol, 0.0025);
-      u.topColor.value.setHex(0x020617);
-      u.midColor.value.setHex(0x1e1b4b);
-      u.horizonColor.value.setHex(0x0891b2);
-      u.sunColor.value.setHex(0xe0e7ff);
-      u.sunDir.value.set(-0.4, 0.85, -0.3).normalize();
-      u.starIntensity.value = 1.0;
-      this.sun.color.setHex(0x818cf8);
-      this.sun.intensity = 0.55;
-      this.hemi.color.setHex(0x312e81);
-      this.hemi.groundColor.setHex(0x09090b);
-      this.hemi.intensity = 0.45;
-      if (this.rainPoints) this.rainPoints.visible = false;
-      this.asphaltMat.roughness = 0.4;
-      this.asphaltMat.metalness = 0.1;
-      this.sidewalkMat.roughness = 0.65;
-    } else if (preset === 'rain') {
-      const fogCol = 0x334155;
-      this.sceneRef.background = new THREE.Color(fogCol);
-      this.sceneRef.fog = new THREE.FogExp2(fogCol, 0.0035);
-      u.topColor.value.setHex(0x1e293b);
-      u.midColor.value.setHex(0x475569);
-      u.horizonColor.value.setHex(0x64748b);
-      u.sunColor.value.setHex(0x94a3b8);
-      u.sunDir.value.set(0.3, 0.9, -0.2).normalize();
-      u.starIntensity.value = 0.0;
-      this.sun.color.setHex(0x94a3b8);
-      this.sun.intensity = 0.75;
-      this.hemi.color.setHex(0x334155);
-      this.hemi.groundColor.setHex(0x1e293b);
-      this.hemi.intensity = 0.65;
-      if (this.rainPoints) this.rainPoints.visible = true;
-      this.asphaltMat.roughness = 0.15;
-      this.asphaltMat.metalness = 0.35;
-      this.sidewalkMat.roughness = 0.3;
+    u.topColor.value.copy(from.topColor).lerp(to.topColor, t);
+    u.midColor.value.copy(from.midColor).lerp(to.midColor, t);
+    u.horizonColor.value.copy(from.horizonColor).lerp(to.horizonColor, t);
+    u.sunColor.value.copy(from.sunColor).lerp(to.sunColor, t);
+    u.sunDir.value.copy(from.sunDir).lerp(to.sunDir, t).normalize();
+    u.starIntensity.value = THREE.MathUtils.lerp(from.starIntensity, to.starIntensity, t);
+
+    // Fog & Background
+    const fogCol = new THREE.Color().copy(from.fogColor).lerp(to.fogColor, t);
+    this.sceneRef.background = fogCol;
+    if (this.sceneRef.fog) {
+      this.sceneRef.fog.color.copy(fogCol);
+      (this.sceneRef.fog as THREE.FogExp2).density = THREE.MathUtils.lerp(from.fogDensity, to.fogDensity, t);
+    }
+
+    // Sunlight
+    this.sun.color.copy(from.sunLightColor).lerp(to.sunLightColor, t);
+    this.sun.intensity = THREE.MathUtils.lerp(from.sunIntensity, to.sunIntensity, t);
+
+    // Hemisphere Light
+    this.hemi.color.copy(from.hemiColor).lerp(to.hemiColor, t);
+    this.hemi.groundColor.copy(from.hemiGroundColor).lerp(to.hemiGroundColor, t);
+    this.hemi.intensity = THREE.MathUtils.lerp(from.hemiIntensity, to.hemiIntensity, t);
+
+    // Asphalt & Sidewalk PBR Materials
+    this.asphaltMat.roughness = THREE.MathUtils.lerp(from.asphaltRoughness, to.asphaltRoughness, t);
+    this.asphaltMat.metalness = THREE.MathUtils.lerp(from.asphaltMetalness, to.asphaltMetalness, t);
+    this.sidewalkMat.roughness = THREE.MathUtils.lerp(from.sidewalkRoughness, to.sidewalkRoughness, t);
+
+    // Rain Particles Opacity & Visibility
+    const rainAlpha = THREE.MathUtils.lerp(from.rainAlpha, to.rainAlpha, t);
+    this.rainAlpha = rainAlpha;
+    if (this.rainPoints) {
+      this.rainPoints.visible = rainAlpha > 0.02;
+      (this.rainPoints.material as THREE.PointsMaterial).opacity = Math.min(1.0, rainAlpha * 0.95);
+    }
+  }
+
+  private weatherSeed = Math.floor(Math.random() * 100000);
+
+  setWeatherSeed(seed: number): void {
+    this.weatherSeed = seed;
+  }
+
+  private updateDynamicWeather(playerDist: number): void {
+    if (!this.isDynamicWeather) return;
+
+    const phase = Math.floor(playerDist / WEATHER_INTERVAL);
+    const currPreset = getRandomWeatherForPhase(phase, this.weatherSeed);
+
+    const distInPhase = playerDist % WEATHER_INTERVAL;
+    const TRANSITION_DIST = 260; // 260m smooth cinematic blend zone
+
+    if (distInPhase < TRANSITION_DIST && phase > 0) {
+      const prevPreset = getRandomWeatherForPhase(phase - 1, this.weatherSeed);
+      const t = THREE.MathUtils.smoothstep(distInPhase / TRANSITION_DIST, 0, 1);
+      this.applyWeatherConfig(WEATHER_PRESETS[prevPreset], WEATHER_PRESETS[currPreset], t);
     } else {
-      const fogCol = 0xb8e2ff;
-      this.sceneRef.background = new THREE.Color(fogCol);
-      this.sceneRef.fog = new THREE.FogExp2(fogCol, 0.0018);
-      u.topColor.value.setHex(0x0284c7);
-      u.midColor.value.setHex(0x38bdf8);
-      u.horizonColor.value.setHex(0xfef08a);
-      u.sunColor.value.setHex(0xfffbeb);
-      u.sunDir.value.set(0.52, 0.76, -0.32).normalize();
-      u.starIntensity.value = 0.0;
-      this.sun.color.setHex(0xfffbeb);
-      this.sun.intensity = 1.85;
-      this.hemi.color.setHex(0x38bdf8);
-      this.hemi.groundColor.setHex(0x22c55e);
-      this.hemi.intensity = 1.15;
-      if (this.rainPoints) this.rainPoints.visible = false;
-      this.asphaltMat.roughness = 0.45;
-      this.asphaltMat.metalness = 0.1;
-      this.sidewalkMat.roughness = 0.8;
+      this.applyWeatherConfig(WEATHER_PRESETS[currPreset], WEATHER_PRESETS[currPreset], 1.0);
     }
   }
 
   update(scroll: number, playerX = 0, playerDist = 0): void {
-    // 1. Ultra-fast direct Float32Array matrix scroller with curve offsets (zero GC allocations)
+    // Dynamic smooth weather interpolation every 3km
+    this.updateDynamicWeather(playerDist);
+
+    // 1. Ultra-fast direct Float32Array matrix scroller (zero GC allocations)
     for (let i = 0; i < this.scrollers.length; i++) {
-      this.scrollers[i].update(scroll, playerDist);
+      this.scrollers[i].update(scroll);
     }
 
-    // 2. Scroll & curve 3D Scenery props (landmarks, towers, houses, shops, barns)
+    // 2. Scroll 3D Scenery props with Active Distance Culling
     for (let i = 0; i < this.sceneryProps.length; i++) {
       const p = this.sceneryProps[i];
       p.obj.position.z += scroll;
       if (p.obj.position.z > SCENERY_BACK) {
         p.obj.position.z -= p.period;
       }
-      const relDepth = Math.max(0, -p.obj.position.z);
-      const curveX = getCurveOffset(playerDist, relDepth);
-      const curveYaw = getCurveYaw(playerDist, relDepth);
-      p.obj.position.x = p.baseX + curveX;
-      p.obj.rotation.y = p.baseRotY + curveYaw;
+      p.obj.visible = p.obj.position.z > -360 && p.obj.position.z < 30;
     }
 
-    // 3. Scroll parallel railway train with road curve
+    // 3. Scroll parallel railway train with visibility check
     if (this.trainGroup) {
       this.trainGroup.position.z += scroll * 0.45;
       if (this.trainGroup.position.z > SCENERY_BACK + 100) {
         this.trainGroup.position.z -= SCENERY_PERIOD;
       }
-      const trainDepth = Math.max(0, -this.trainGroup.position.z);
-      const curveX = getCurveOffset(playerDist, trainDepth);
-      const curveYaw = getCurveYaw(playerDist, trainDepth);
-      this.trainGroup.position.x = -68 + curveX;
-      this.trainGroup.rotation.y = curveYaw;
+      this.trainGroup.visible = this.trainGroup.position.z > -400 && this.trainGroup.position.z < 60;
     }
 
-    // 4. Update GPU Ground, Sidewalk & Meadow Mesh Curves
-    this.updateGroundPlaneCurves(playerDist);
+    // 4. Parallax drift on cloud layers
+    for (let i = 0; i < this.cloudLayers.length; i++) {
+      const cl = this.cloudLayers[i];
+      cl.mesh.position.x += cl.speedX;
+      cl.mesh.position.z += scroll * 0.15 + cl.speedZ;
+      if (cl.mesh.position.z > 100) cl.mesh.position.z -= 900;
+      if (cl.mesh.position.x > 300) cl.mesh.position.x -= 600;
+      else if (cl.mesh.position.x < -300) cl.mesh.position.x += 600;
+    }
 
     // 5. Zero-drift deterministic texture offset directly calculated from player distance
     this.groundTex.offset.y = (playerDist / TILE_LEN) % 1;
@@ -344,93 +455,32 @@ export class Road {
     if (this.rainPoints && this.rainGeo && this.rainPoints.visible) {
       const pos = this.rainGeo.attributes.position.array as Float32Array;
       const count = pos.length / 3;
+      const fallSpeed = 1.35;
+      const windDrift = 0.14;
       for (let i = 0; i < count; i++) {
-        pos[i * 3 + 1] -= 0.85;
-        if (pos[i * 3 + 1] < 0) {
-          pos[i * 3 + 1] = 30 + Math.random() * 8;
+        pos[i * 3] += windDrift;
+        pos[i * 3 + 1] -= fallSpeed;
+        pos[i * 3 + 2] += scroll * 0.2;
+
+        if (pos[i * 3 + 1] < 0.1 || pos[i * 3 + 2] > 12) {
+          pos[i * 3 + 1] = 26 + Math.random() * 8;
           pos[i * 3] = playerX + (Math.random() - 0.5) * 55;
-          pos[i * 3 + 2] = -playerDist - Math.random() * 80 + 15;
+          pos[i * 3 + 2] = -Math.random() * 110 + 5;
         }
       }
       this.rainGeo.attributes.position.needsUpdate = true;
     }
   }
 
-  private updateGroundPlaneCurves(playerDist: number): void {
-    const SEGMENTS = 80;
-    // 1. Asphalt Road Surface
-    if (this.groundGeo) {
-      const pos = this.groundGeo.attributes.position.array as Float32Array;
-      for (let r = 0; r <= SEGMENTS; r++) {
-        const localY = (0.5 - r / SEGMENTS) * GROUND_LEN;
-        const worldZ = GROUND_CENTER - localY;
-        const depth = Math.max(0, -worldZ);
-        const curveX = getCurveOffset(playerDist, depth);
-
-        const vLeft = r * 2;
-        const vRight = r * 2 + 1;
-        pos[vLeft * 3] = -ROAD_HALF + curveX;
-        pos[vRight * 3] = ROAD_HALF + curveX;
-      }
-      this.groundGeo.attributes.position.needsUpdate = true;
-    }
-
-    // 2. Sidewalk Boulevards
-    const sideWidth = 14;
-    for (const item of this.sidewalkGeos) {
-      const pos = item.geo.attributes.position.array as Float32Array;
-      const baseCenter = item.baseOffset;
-      for (let r = 0; r <= SEGMENTS; r++) {
-        const localY = (0.5 - r / SEGMENTS) * GROUND_LEN;
-        const worldZ = GROUND_CENTER - localY;
-        const depth = Math.max(0, -worldZ);
-        const curveX = getCurveOffset(playerDist, depth);
-
-        const vLeft = r * 2;
-        const vRight = r * 2 + 1;
-        pos[vLeft * 3] = baseCenter - sideWidth / 2 + curveX;
-        pos[vRight * 3] = baseCenter + sideWidth / 2 + curveX;
-      }
-      item.geo.attributes.position.needsUpdate = true;
-    }
-
-    // 3. Meadow Terrain
-    if (this.terrainGeo) {
-      const pos = this.terrainGeo.attributes.position.array as Float32Array;
-      for (let r = 0; r <= SEGMENTS; r++) {
-        const localY = (0.5 - r / SEGMENTS) * GROUND_LEN;
-        const worldZ = GROUND_CENTER - localY;
-        const depth = Math.max(0, -worldZ);
-        const curveX = getCurveOffset(playerDist, depth);
-
-        const vLeft = r * 2;
-        const vRight = r * 2 + 1;
-        pos[vLeft * 3] = -275 + curveX;
-        pos[vRight * 3] = 275 + curveX;
-      }
-      this.terrainGeo.attributes.position.needsUpdate = true;
-    }
-  }
-
-  /**
-   * Generates a high-definition PBR asphalt texture complete with:
-   * - 3 cleanly separated lanes
-   * - White dashed center lane dividers (- - - -)
-   * - Crisp solid white shoulder lines
-   * - Retro-reflective Cat's Eye pavement markers (road studs)
-   * - Outer safety curb hazard stripes and asphalt grit noise
-   */
   private buildPBRHighwaySurface(): THREE.Mesh {
     const cv = document.createElement('canvas');
     cv.width = 1024;
     cv.height = 2048;
     const ctx = cv.getContext('2d')!;
 
-    // 1. Dark asphalt base
     ctx.fillStyle = '#14171f';
     ctx.fillRect(0, 0, 1024, 2048);
 
-    // 2. Micro-grit texture
     ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
     for (let y = 0; y < 2048; y += 4) {
       for (let x = 0; x < 1024; x += 8) {
@@ -444,20 +494,16 @@ export class Road {
     const pxPerMeter = 1024 / totalRoadWidth;
     const midX = 512;
 
-    // Dividers are at X = -2.25m and X = +2.25m
     const divLeftX = midX - 2.25 * pxPerMeter;
     const divRightX = midX + 2.25 * pxPerMeter;
 
-    // Shoulder lines at ±6.75m
     const shoulderLeftX = midX - 6.75 * pxPerMeter;
     const shoulderRightX = midX + 6.75 * pxPerMeter;
 
-    // 3. Solid White Shoulder Lines with crisp borders
     ctx.fillStyle = '#f8fafc';
     ctx.fillRect(shoulderLeftX - 6, 0, 12, 2048);
     ctx.fillRect(shoulderRightX - 6, 0, 12, 2048);
 
-    // 4. Dashed Center Lane Dividers (4m dash, 6m gap in 100m tile -> repeat pattern)
     const pixelsPerTileM = 2048 / TILE_LEN;
     const dashPx = 4.0 * pixelsPerTileM;
     const gapPx = 6.0 * pixelsPerTileM;
@@ -469,22 +515,18 @@ export class Road {
       ctx.fillRect(divRightX - 5, y, 10, dashPx);
     }
 
-    // 5. Retro-reflective Cat's Eye Pavement Studs (amber glow)
     const studSpacingPx = 16.0 * pixelsPerTileM;
     for (let y = 0; y < 2048; y += studSpacingPx) {
-      // Lane divider studs (Amber yellow)
       ctx.fillStyle = '#fbbf24';
       ctx.fillRect(divLeftX - 4, y, 8, 8);
       ctx.fillRect(divRightX - 4, y, 8, 8);
 
-      // Shoulder studs (White / Red)
       ctx.fillStyle = '#ef4444';
       ctx.fillRect(shoulderLeftX - 4, y, 8, 8);
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(shoulderRightX - 4, y, 8, 8);
     }
 
-    // 6. Curb edge hazard accents
     const curbWidthPx = (ROAD_HALF - 7.2) * pxPerMeter;
     for (let y = 0; y < 2048; y += 64) {
       ctx.fillStyle = (y / 64) % 2 === 0 ? '#1f2937' : '#9ca3af';
@@ -502,9 +544,8 @@ export class Road {
       metalness: 0.1
     });
 
-    this.groundGeo = new THREE.PlaneGeometry(ROAD_HALF * 2, GROUND_LEN, 1, 80);
     const ground = new THREE.Mesh(
-      this.groundGeo,
+      new THREE.PlaneGeometry(ROAD_HALF * 2, GROUND_LEN),
       this.asphaltMat
     );
     ground.rotation.x = -Math.PI / 2;
@@ -513,9 +554,6 @@ export class Road {
     return ground;
   }
 
-  /**
-   * Concrete paved pedestrian promenade / sidewalk boulevard on both sides (X = ±8m to ±21m)
-   */
   private buildSidewalkBoulevards(): THREE.Group {
     const g = new THREE.Group();
     const cv = document.createElement('canvas');
@@ -523,7 +561,6 @@ export class Road {
     cv.height = 256;
     const ctx = cv.getContext('2d')!;
 
-    // Concrete paving slabs texture
     ctx.fillStyle = '#cbd5e1';
     ctx.fillRect(0, 0, 256, 256);
     ctx.strokeStyle = '#94a3b8';
@@ -545,19 +582,14 @@ export class Road {
       color: 0xe2e8f0
     });
 
-    this.sidewalkGeos = [];
-    const sideWidth = 14; // 14m wide sidewalk from X=8m to X=22m
+    const sideWidth = 14; 
     for (const side of [-1, 1]) {
-      const walkGeo = new THREE.PlaneGeometry(sideWidth, GROUND_LEN, 1, 80);
-      const baseOffset = side * (ROAD_HALF + sideWidth / 2);
-      this.sidewalkGeos.push({ geo: walkGeo, baseOffset });
-
       const walkMesh = new THREE.Mesh(
-        walkGeo,
+        new THREE.PlaneGeometry(sideWidth, GROUND_LEN),
         this.sidewalkMat
       );
       walkMesh.rotation.x = -Math.PI / 2;
-      walkMesh.position.set(0, -0.04, GROUND_CENTER);
+      walkMesh.position.set(side * (ROAD_HALF + sideWidth / 2), -0.04, GROUND_CENTER);
       walkMesh.receiveShadow = true;
       g.add(walkMesh);
     }
@@ -570,7 +602,6 @@ export class Road {
     cv.height = 256;
     const ctx = cv.getContext('2d')!;
 
-    // Rich grassy meadow
     ctx.fillStyle = '#2e7d32';
     ctx.fillRect(0, 0, 256, 256);
     ctx.fillStyle = '#388e3c';
@@ -590,8 +621,7 @@ export class Road {
       color: 0x4caf50
     });
 
-    this.terrainGeo = new THREE.PlaneGeometry(550, GROUND_LEN, 1, 80);
-    const terrain = new THREE.Mesh(this.terrainGeo, mat);
+    const terrain = new THREE.Mesh(new THREE.PlaneGeometry(550, GROUND_LEN), mat);
     terrain.rotation.x = -Math.PI / 2;
     terrain.position.set(0, -0.06, GROUND_CENTER);
     terrain.receiveShadow = true;
@@ -733,7 +763,6 @@ export class Road {
     for (const side of [-1, 1]) {
       for (let i = 0; i < count; i++) {
         const z = -i * spacing - 8;
-        // Trees positioned along sidewalk planter strip (X = 13.5m to 16.5m)
         const xOffset = side * (ROAD_HALF + 5.5 + ((i * 3) % 4));
 
         const mt = new THREE.Matrix4();
@@ -777,11 +806,6 @@ export class Road {
     return g;
   }
 
-  /**
-   * Spawns closer, high-impact 3D landmark buildings:
-   * Placed along the pedestrian boulevard promenade at X = ±21m to ±26m.
-   * Their front facades line the sidewalk directly, giving an immersive city corridor feel!
-   */
   private populate3DScenery(): void {
     while (this.dynamicSceneryGroup.children.length > 0) {
       this.dynamicSceneryGroup.remove(this.dynamicSceneryGroup.children[0]);
@@ -799,50 +823,54 @@ export class Road {
         }
       });
       this.dynamicSceneryGroup.add(obj);
-      this.sceneryProps.push({ obj, initZ: z, baseX: x, baseRotY: rotY, period: SCENERY_PERIOD });
+      this.sceneryProps.push({ obj, initZ: z, period: SCENERY_PERIOD });
     };
 
-    // 16 Landmark buildings spaced every 125m across the 5 Biomes
-    const landmarkInterval = 125;
+    const landmarkInterval = 28.0;
     const numSlots = Math.floor(SCENERY_PERIOD / landmarkInterval);
 
     for (let i = 0; i < numSlots; i++) {
-      const z = -i * landmarkInterval - 30;
+      const z = -i * landmarkInterval - 20;
       const biome = Math.floor((-z % SCENERY_PERIOD) / 400);
 
       for (const side of [-1, 1]) {
-        // Buildings placed closer (X = ±22m) right behind the 14m sidewalk!
-        const x = side * (22.5 + ((i * 3) % 4));
+        // Buildings placed along the sidewalk promenade (X = ±22.0m to ±25.0m)
+        const x = side * (22.0 + ((i * 3) % 3));
         const facing = side > 0 ? -Math.PI / 2 : Math.PI / 2;
 
         if (biome === 0) {
-          // Biome 0: Downtown Skyscraper Skyline (Towers & Highrises)
           if (assetLoader.towers.length) {
             const tmpl = assetLoader.towers[(i + (side > 0 ? 2 : 0)) % assetLoader.towers.length];
             addProp(tmpl.clone(true), x, 0, z, facing);
           }
         } else if (biome === 1) {
-          // Biome 1: Commercial Strip (Shops, Supermarkets, Cafes)
+          // Biome 1: Commercial Highway Strip (Shops, Cafes, Storefronts, Supermarkets)
           if (assetLoader.shops.length) {
             const tmpl = assetLoader.shops[(i * 2 + (side > 0 ? 1 : 0)) % assetLoader.shops.length];
             addProp(tmpl.clone(true), x, 0, z, facing);
           }
         } else if (biome === 2) {
-          // Biome 2: Suburban Villas & Neighborhood (Houses)
+          // Biome 2: Suburban Neighborhood (Two-story villas, houses, cottages)
           if (assetLoader.houses.length) {
             const tmpl = assetLoader.houses[(i * 2 + (side > 0 ? 1 : 0)) % assetLoader.houses.length];
             addProp(tmpl.clone(true), x, 0, z, facing);
           }
         } else if (biome === 3) {
-          // Biome 3: Forest Canyon (Rock Formations, Ancient Trees)
+          // Biome 3: Forest Canyon & Mountain Boulders (Rocks, Ancient Trees, Rustic Shacks)
           if (assetLoader.trees.length) {
             const tmpl = assetLoader.trees[(i * 3) % assetLoader.trees.length];
             addProp(tmpl.clone(true), x, 0, z, (i * 90 * Math.PI) / 180, 1.2);
+          } else if (assetLoader.houses.length) {
+            const tmpl = assetLoader.houses[(i + 4) % assetLoader.houses.length];
+            addProp(tmpl.clone(true), x, 0, z, facing, 0.9);
           }
         } else {
-          // Biome 4: Farmland Barns & Windmills
+          // Biome 4: Farmland Countryside & Mills (Red barns, Windmills, Silos, Ferris Wheel)
           if (side < 0 && assetLoader.pastoralProps.length) {
             const tmpl = assetLoader.pastoralProps[(i * 2) % assetLoader.pastoralProps.length];
+            addProp(tmpl.clone(true), x, 0, z, facing);
+          } else if (assetLoader.houses.length) {
+            const tmpl = assetLoader.houses[(i + 2) % assetLoader.houses.length];
             addProp(tmpl.clone(true), x, 0, z, facing);
           }
         }
@@ -861,7 +889,7 @@ export class Road {
     const railX = ROAD_HALF + 22.0;
 
     let carOffsetZ = 0;
-    for (let c = 0; c < Math.min(5, assetLoader.railwayCars.length); c++) {
+    for (let c = 0; c < Math.min(8, assetLoader.railwayCars.length); c++) {
       const tmpl = assetLoader.railwayCars[c];
       const car = tmpl.clone(true);
       car.position.set(0, 0, carOffsetZ);
@@ -877,60 +905,77 @@ export class Road {
   private buildDistantMountains(): THREE.Group {
     const g = new THREE.Group();
     const mGeo = new THREE.ConeGeometry(90, 75, 6);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x64748b,
+      roughness: 0.95,
+      flatShading: true
+    });
 
-    // 3 Layered Anime Ridges (Emerald -> Indigo -> Twilight Purple)
-    const layerColors = [0x15803d, 0x1d4ed8, 0x4338ca, 0x6d28d9];
-
-    for (let i = 0; i < 16; i++) {
-      const mat = new THREE.MeshStandardMaterial({
-        color: layerColors[i % layerColors.length],
-        roughness: 0.85,
-        flatShading: true
-      });
+    for (let i = 0; i < 8; i++) {
       const m = new THREE.Mesh(mGeo, mat);
-      const side = i % 2 === 0 ? 1 : -1;
-      const x = side * (160 + (i % 5) * 45);
-      const z = -400 - i * 50;
-      const scale = 0.9 + (i % 4) * 0.3;
-      m.scale.set(scale, scale * 1.25, scale);
-      m.position.set(x, 28, z);
+      const x = (i % 2 === 0 ? -1 : 1) * (180 + (i * 35) % 80);
+      const z = -200 - i * 110;
+      m.position.set(x, 35, z);
       g.add(m);
     }
     return g;
   }
 
-  private buildSummerClouds(): THREE.Group {
-    const g = new THREE.Group();
-    const puffGeo = new THREE.SphereGeometry(1, 8, 8);
-    const cloudMat = new THREE.MeshStandardMaterial({
+  /**
+   * 3-Layered Volumetric Cumulus Clouds with warm sun scattering and parallax drift
+   */
+  private buildLayeredCumulusClouds(): THREE.Group {
+    this.cloudsGroup = new THREE.Group();
+    this.cloudLayers = [];
+
+    const puffGeo = new THREE.DodecahedronGeometry(14, 1);
+    const cloudMat1 = new THREE.MeshStandardMaterial({
       color: 0xffffff,
+      roughness: 0.85,
+      transparent: true,
+      opacity: 0.85
+    });
+    const cloudMat2 = new THREE.MeshStandardMaterial({
+      color: 0xfef08a,
       roughness: 0.9,
-      flatShading: true
+      transparent: true,
+      opacity: 0.7
     });
 
-    for (let c = 0; c < 14; c++) {
-      const cloud = new THREE.Group();
-      for (let p = 0; p < 6; p++) {
-        const puff = new THREE.Mesh(puffGeo, cloudMat);
-        puff.scale.set(18, 14, 18);
-        puff.position.set((Math.random() - 0.5) * 36, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 36);
-        cloud.add(puff);
+    // Layer 1: Low fast cumulus puffs (Altitude 80m)
+    for (let i = 0; i < 12; i++) {
+      const cluster = new THREE.Group();
+      for (let p = 0; p < 4; p++) {
+        const puff = new THREE.Mesh(puffGeo, cloudMat1);
+        puff.position.set((Math.random() - 0.5) * 22, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 22);
+        puff.scale.set(1.4 + Math.random() * 0.5, 0.6 + Math.random() * 0.3, 1.2 + Math.random() * 0.4);
+        cluster.add(puff);
       }
-      cloud.position.set((Math.random() - 0.5) * 650, 90 + Math.random() * 40, -350 - c * 45);
-      g.add(cloud);
+      cluster.position.set((Math.random() - 0.5) * 350, 75 + Math.random() * 15, -Math.random() * 800);
+      this.cloudsGroup.add(cluster);
+      this.cloudLayers.push({ mesh: cluster, speedX: 0.015, speedZ: -0.04 });
     }
-    return g;
+
+    // Layer 2: Mid-level golden rim clouds (Altitude 115m)
+    for (let i = 0; i < 8; i++) {
+      const cluster = new THREE.Group();
+      for (let p = 0; p < 5; p++) {
+        const puff = new THREE.Mesh(puffGeo, cloudMat2);
+        puff.position.set((Math.random() - 0.5) * 35, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 35);
+        puff.scale.set(2.0 + Math.random() * 0.6, 0.7 + Math.random() * 0.3, 1.8 + Math.random() * 0.5);
+        cluster.add(puff);
+      }
+      cluster.position.set((Math.random() - 0.5) * 450, 115 + Math.random() * 20, -Math.random() * 900);
+      this.cloudsGroup.add(cluster);
+      this.cloudLayers.push({ mesh: cluster, speedX: -0.008, speedZ: -0.02 });
+    }
+
+    return this.cloudsGroup;
   }
 }
 
-/**
- * Ultra-fast direct Float32Array matrix scroller.
- * Directly increments the Z coordinate in instanceMatrix column-major buffer
- * (matrix index 14) and applies dynamic road curvature offsets along the spline.
- */
 class FastScroller {
   private array: Float32Array;
-  private basePositions: Float32Array;
 
   constructor(
     private mesh: THREE.InstancedMesh,
@@ -939,29 +984,19 @@ class FastScroller {
     private period: number
   ) {
     this.array = mesh.instanceMatrix.array as Float32Array;
-    this.basePositions = new Float32Array(count * 2);
-    for (let i = 0; i < count; i++) {
-      this.basePositions[i * 2] = this.array[i * 16 + 12];
-      this.basePositions[i * 2 + 1] = this.array[i * 16 + 13];
-    }
   }
 
-  update(scroll: number, playerDist = 0): void {
+  update(scroll: number): void {
     const arr = this.array;
-    const base = this.basePositions;
     const count = this.count;
     const backZ = this.backZ;
     const period = this.period;
 
     for (let i = 0; i < count; i++) {
-      const idx = i * 16;
-      let z = arr[idx + 14] + scroll;
+      const idx = i * 16 + 14;
+      let z = arr[idx] + scroll;
       if (z > backZ) z -= period;
-      arr[idx + 14] = z;
-
-      const relDepth = Math.max(0, -z);
-      const curveX = getCurveOffset(playerDist, relDepth);
-      arr[idx + 12] = base[i * 2] + curveX;
+      arr[idx] = z;
     }
     this.mesh.instanceMatrix.needsUpdate = true;
   }
