@@ -35,13 +35,22 @@ const clientDist = fileURLToPath(new URL('../../client/dist', import.meta.url));
 const staticServe = existsSync(clientDist) ? sirv(clientDist, { single: true }) : null;
 
 const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+  if (req.url === '/health' || req.url === '/ping') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', uptime: process.uptime(), memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024) }));
+    return;
+  }
   if (staticServe) {
     staticServe(req, res);
   } else {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Highway Rush Game Server Running');
+    res.end('LaneShifter Multiplayer Game Server Running');
   }
 });
+
+const customAllowed = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim().toLowerCase())
+  : [];
 
 function allowedOrigin(origin: string | undefined, callback: (err: Error | null, origin?: string | boolean) => void): void {
   // Non-browser clients (harnesses) send no origin.
@@ -50,13 +59,19 @@ function allowedOrigin(origin: string | undefined, callback: (err: Error | null,
     return;
   }
   try {
-    const host = new URL(origin).hostname;
+    const url = new URL(origin);
+    const host = url.hostname.toLowerCase();
     if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
       callback(null, true);
       return;
     }
     // Private LAN hosts (dev: phone hits the PC's LAN IP)
     if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) {
+      callback(null, true);
+      return;
+    }
+    // Render cloud domains (*.onrender.com) or custom configured origins
+    if (host.endsWith('.onrender.com') || customAllowed.includes(origin.toLowerCase()) || customAllowed.includes(host)) {
       callback(null, true);
       return;
     }
@@ -78,6 +93,31 @@ const joinAttempts = new Map<string, number[]>();
 const rejoinAttempts = new Map<string, number[]>();
 const ipJoinAttempts = new Map<string, number[]>();
 const IP_JOIN_RATE_MAX = 30;
+
+function pruneRateLimiter(bucket: Map<string, number[]>, now: number): void {
+  for (const [key, timestamps] of bucket) {
+    const recent = timestamps.filter((t) => now - t < 60_000);
+    if (!recent.length) bucket.delete(key);
+    else bucket.set(key, recent);
+  }
+}
+
+function removeTokensForRoom(roomId: string): void {
+  for (const [token, info] of tokens) {
+    if (info.roomId === roomId) tokens.delete(token);
+  }
+}
+
+// Periodic cleanup to keep memory usage minimal on free-tier hosts
+setInterval(() => {
+  const now = Date.now();
+  pruneRateLimiter(joinAttempts, now);
+  pruneRateLimiter(rejoinAttempts, now);
+  pruneRateLimiter(ipJoinAttempts, now);
+  for (const [token, info] of tokens) {
+    if (!rooms.has(info.roomId)) tokens.delete(token);
+  }
+}, 30_000);
 
 function leaveOtherRooms(socket: ServerSocket): void {
   for (const r of socket.rooms) {
@@ -175,7 +215,9 @@ function isValidInput(msg: unknown): msg is InputMsg {
   const brakeOk = typeof m.brake === 'number' && Number.isFinite(m.brake) && m.brake >= 0 && m.brake <= 1;
   return (
     typeof m.seq === 'number' &&
-    Number.isFinite(m.seq) &&
+    Number.isInteger(m.seq) &&
+    m.seq >= 0 &&
+    m.seq <= Number.MAX_SAFE_INTEGER &&
     steerOk &&
     throttleOk &&
     brakeOk
@@ -386,12 +428,13 @@ setInterval(() => {
       } catch (err) {
         // One hostile/buggy room must never take down the whole server.
         console.error(`[room ${room.code}] tick crashed, dropping room:`, err);
+        removeTokensForRoom(room.code);
         for (const pid of [...room.players.keys()]) removeTokenFor(pid);
         rooms.delete(room.code);
         continue;
       }
       if (!room.players.size) {
-        for (const pid of [...room.players.keys()]) removeTokenFor(pid);
+        removeTokensForRoom(room.code);
         rooms.delete(room.code);
       }
     }

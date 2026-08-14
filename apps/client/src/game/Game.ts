@@ -54,9 +54,9 @@ interface PresetCfg {
 }
 
 const PRESETS: Record<Preset, PresetCfg> = {
-  low: { pixelRatio: 1, shadows: false, density: 0.55, bloom: false, far: 900, fog: 0.0032, buildings: 18, lamps: 18 },
-  medium: { pixelRatio: Math.min(window.devicePixelRatio, 1.5), shadows: true, density: 0.8, bloom: true, far: 1300, fog: 0.0024, buildings: 30, lamps: 25 },
-  high: { pixelRatio: Math.min(window.devicePixelRatio, 2), shadows: true, density: 1.0, bloom: true, far: 1600, fog: 0.0019, buildings: 46, lamps: 25 }
+  low: { pixelRatio: 1, shadows: false, density: 0.55, bloom: false, far: 900, fog: 0.0028, buildings: 18, lamps: 18 },
+  medium: { pixelRatio: Math.min(window.devicePixelRatio, 1.25), shadows: true, density: 0.8, bloom: false, far: 1200, fog: 0.0022, buildings: 30, lamps: 25 },
+  high: { pixelRatio: Math.min(window.devicePixelRatio, 1.5), shadows: true, density: 1.0, bloom: false, far: 1400, fog: 0.0018, buildings: 46, lamps: 25 }
 };
 
 interface Burst {
@@ -125,7 +125,6 @@ export class Game {
     this.renderer.toneMappingExposure = 1.15;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
-    this.scene.environment = assetLoader.generateEnvironmentMap(this.renderer);
     void assetLoader.preload();
 
     this.player = new Player(this.scene);
@@ -138,6 +137,7 @@ export class Game {
 
     this.hud = new Hud(container, {
       onPreset: (p) => this.applyPreset(p),
+      onWeather: (w) => this.road.setWeather(w),
       onAutoThrottle: (b) => (this.input.autoThrottle = b),
       onSensitivity: (n) => (this.input.sensitivity = n),
       onSound: (b) => this.audio.setMuted(!b),
@@ -160,6 +160,9 @@ export class Game {
         if (!this.online) this.restart();
       }
     });
+
+    const savedWeather = (localStorage.getItem('hr_weather') || 'day') as 'day' | 'sunset' | 'night' | 'rain';
+    this.road.setWeather(savedWeather);
 
     this.input = new Input(this.hud.steerLeftBtn, this.hud.steerRightBtn, this.hud.brakeBtn, this.hud.throttleBtn, {
       onSteerVisual: () => undefined
@@ -184,6 +187,8 @@ export class Game {
     window.addEventListener('resize', () => this.resize());
     this.resize();
     this.applyPreset(this.preset);
+    this.player.syncVisuals(0);
+    this.road.update(0, 0, 0);
   }
 
   start(): void {
@@ -193,7 +198,12 @@ export class Game {
 
   private loop(): void {
     const dt = Math.min(this.clock.getDelta(), 0.1);
-    if (this.mode === 'running') this.update(dt);
+    if (this.mode === 'running') {
+      this.update(dt);
+    } else {
+      this.player.syncVisuals(dt);
+      this.road.update(0, this.player.state.x, this.player.state.distance);
+    }
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.player.camera);
     this.tickFps(dt);
@@ -614,8 +624,15 @@ export class Game {
     }
     for (const p of snap.players) {
       if (p.id === mine || this.remotes.has(p.id)) continue;
-      const color = TRAFFIC_COLORS[hashId(p.id) % TRAFFIC_COLORS.length];
-      const mesh = createCarMesh({ color });
+      const modelIdx = hashId(p.id) % 18;
+      const glbCar = assetLoader.createTrafficCarInstance(modelIdx);
+      let mesh: THREE.Group;
+      if (glbCar) {
+        mesh = glbCar;
+      } else {
+        const color = TRAFFIC_COLORS[hashId(p.id) % TRAFFIC_COLORS.length];
+        mesh = createCarMesh({ color });
+      }
       mesh.traverse((o) => {
         if (o instanceof THREE.Mesh) o.castShadow = true;
       });
@@ -733,9 +750,9 @@ export class Game {
       this.composer.addPass(new RenderPass(this.scene, this.player.camera));
       this.bloomPass = new UnrealBloomPass(
         new THREE.Vector2(window.innerWidth, window.innerHeight),
-        0.18,
-        0.4,
-        0.92
+        0.26,
+        0.45,
+        0.88
       );
       this.composer.addPass(this.bloomPass);
     } else if (!cfg.bloom && this.composer) {

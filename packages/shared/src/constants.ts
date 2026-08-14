@@ -16,13 +16,13 @@ export function laneCenterX(lane: number): number {
 
 // ---- Player arcade physics ----
 export const PLAYER_MAX_SPEED = 58; // m/s ~= 209 km/h
-export const ACCELERATION = 11; // m/s^2
-export const BRAKE_DECEL = 24;
+export const ACCELERATION = 12; // m/s^2
+export const BRAKE_DECEL = 26;
 export const DRAG_DECEL = 5;
-export const LATERAL_SPEED = 12; // m/s lateral lane-change speed (at top speed)
-export const STEER_RESPONSE = 10; // 1/s steering input smoothing rate
-export const STEER_ROLL = 0.26; // rad body roll when steering
-export const STEER_YAW = 0.2; // rad nose yaw when steering
+export const LATERAL_SPEED = 14; // m/s lateral lane-change speed (snappy arcade control)
+export const STEER_RESPONSE = 15; // 1/s steering input smoothing rate (instant response)
+export const STEER_ROLL = 0.032; // rad subtle sports suspension roll (tires stay firmly glued to asphalt)
+export const STEER_YAW = 0.085; // rad clean sports car nose yaw
 export const START_SPEED = 0;
 
 // ---- Traffic ----

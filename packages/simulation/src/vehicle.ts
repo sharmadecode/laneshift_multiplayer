@@ -70,20 +70,24 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
 
   // --- 1. Longitudinal Acceleration with Powerband Torque ---
   let targetAccel = 0;
-  if (input.throttle > 0 && v.speed < PLAYER_MAX_SPEED) {
-    // High-speed aerodynamic resistance + torque curve
-    const speedRatio = v.speed / PLAYER_MAX_SPEED;
-    const powerMult = Math.max(0.35, 1.0 - 0.55 * Math.pow(speedRatio, 1.4));
-    targetAccel = ACCELERATION * input.throttle * powerMult;
-    v.speed += targetAccel * dt;
-  } else if (input.brake > 0) {
+  if (input.brake > 0) {
     targetAccel = -BRAKE_DECEL * input.brake;
-    v.speed += targetAccel * dt;
+    v.speed = Math.max(0, v.speed + targetAccel * dt);
+  } else if (input.throttle > 0) {
+    if (v.speed < PLAYER_MAX_SPEED) {
+      // High-speed aerodynamic resistance + torque curve
+      const speedRatio = v.speed / PLAYER_MAX_SPEED;
+      const powerMult = Math.max(0.35, 1.0 - 0.55 * Math.pow(speedRatio, 1.4));
+      targetAccel = ACCELERATION * input.throttle * powerMult;
+      v.speed = Math.min(PLAYER_MAX_SPEED, v.speed + targetAccel * dt);
+    } else {
+      v.speed = PLAYER_MAX_SPEED;
+      targetAccel = 0;
+    }
   } else {
     targetAccel = -DRAG_DECEL;
-    v.speed -= DRAG_DECEL * dt;
+    v.speed = Math.max(0, v.speed - DRAG_DECEL * dt);
   }
-  v.speed = Math.max(0, Math.min(PLAYER_MAX_SPEED, v.speed));
 
   // --- 2. 7-Speed Transmission & RPM ---
   let curGear = 1;
@@ -107,7 +111,9 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
   const oldSteer = v.steering;
   v.steering += (targetSteer - v.steering) * k;
 
-  const lateralVel = v.steering * LATERAL_SPEED * (0.4 + 0.6 * speedNorm);
+  // Responsive arcade lateral control: sharp, immediate lane switching with zero float
+  const speedGripFactor = Math.min(1.0, Math.max(0, (v.speed - 1.0) / 4.0));
+  const lateralVel = v.steering * LATERAL_SPEED * (0.6 + 0.4 * speedNorm) * speedGripFactor;
   v.x += lateralVel * dt;
   if (Math.abs(v.x) > LANE_RANGE) {
     v.x = Math.sign(v.x) * LANE_RANGE;
@@ -119,13 +125,17 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
   v.lateralG += (rawLateralG - v.lateralG) * (1 - Math.pow(Math.E, -14 * dt));
 
   // --- 4. Suspension Spring-Damper Dynamics ---
-  // Pitch: Braking dives front (-0.035 rad), throttle squats rear (+0.025 rad)
-  const targetPitch = targetAccel < -2 ? 0.032 * (Math.abs(targetAccel) / BRAKE_DECEL) : targetAccel > 2 ? -0.024 * (targetAccel / ACCELERATION) : 0;
-  v.pitch += (targetPitch - v.pitch) * (1 - Math.pow(Math.E, -10 * dt));
+  // Pitch: Throttle lifts front (+rad, squats rear), Braking dives front (-rad, lifts rear)
+  const targetPitch = targetAccel > 2
+    ? 0.025 * (targetAccel / ACCELERATION)
+    : targetAccel < -2
+    ? -0.032 * (Math.abs(targetAccel) / BRAKE_DECEL)
+    : 0;
+  v.pitch += (targetPitch - v.pitch) * (1 - Math.pow(Math.E, -14 * dt));
 
-  // Roll: Chassis leans away from turn direction
-  const targetRoll = -v.lateralG * 0.048;
-  v.roll += (targetRoll - v.roll) * (1 - Math.pow(Math.E, -12 * dt));
+  // Roll: Stiff sports anti-roll bar
+  const targetRoll = -v.lateralG * 0.022;
+  v.roll += (targetRoll - v.roll) * (1 - Math.pow(Math.E, -14 * dt));
 
   // --- 5. Distance Traveled ---
   v.distance += v.speed * dt;

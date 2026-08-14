@@ -14,6 +14,7 @@ export type Preset = 'low' | 'medium' | 'high';
 
 export interface HudCallbacks {
   onPreset: (p: Preset) => void;
+  onWeather?: (w: 'day' | 'sunset' | 'night' | 'rain') => void;
   onAutoThrottle: (b: boolean) => void;
   onSensitivity: (n: number) => void;
   onSound: (b: boolean) => void;
@@ -159,6 +160,17 @@ export class Hud {
             </select>
           </div>
         </div>
+        <div class="setting-row">
+          <label for="hr-weather">WEATHER &amp; ATMOSPHERE</label>
+          <div class="select-wrap">
+            <select id="hr-weather">
+              <option value="day">☀️ CLEAR DAYLIGHT</option>
+              <option value="sunset">🌅 SUNSET GOLDEN HOUR</option>
+              <option value="night">🌃 CYBERPUNK NIGHT</option>
+              <option value="rain">🌧️ STORMY RAIN</option>
+            </select>
+          </div>
+        </div>
         <div class="setting-row switch-row">
           <label for="hr-auto">AUTO THROTTLE</label>
           <label class="switch">
@@ -176,6 +188,16 @@ export class Hud {
         <div class="setting-row">
           <label for="hr-sens">STEERING RESPONSE <span class="setting-val" id="hr-sens-val"></span></label>
           <input type="range" id="hr-sens" min="0.5" max="1.5" step="0.05" />
+        </div>
+        <div class="credits-section" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 11px; color: #94a3b8; line-height: 1.45; max-height: 160px; overflow-y: auto;">
+          <div style="font-weight: 700; color: #f1f5f9; margin-bottom: 6px; letter-spacing: 0.5px;">3D MODEL ATTRIBUTIONS (CC-BY / CC0)</div>
+          <div>• <b>Toyota AE86</b> by <a href="https://poly.pizza/m/ZEFWmOPSgh" target="_blank" style="color:#38bdf8;text-decoration:none;">IvOfficial</a> (CC-BY 3.0)</div>
+          <div>• <b>CAR Model</b> by <a href="https://poly.pizza/m/5zUWP5UsLg-" target="_blank" style="color:#38bdf8;text-decoration:none;">Ignition Labs</a> (CC-BY 3.0)</div>
+          <div>• <b>City Pack</b> by <a href="https://poly.pizza/bundle/City-Pack-q11onRvPoJ" target="_blank" style="color:#38bdf8;text-decoration:none;">dreamdev</a> (CC-BY 3.0)</div>
+          <div>• <b>Race Kit</b> by <a href="https://poly.pizza/bundle/Race-kit-LcWNxpyXuL" target="_blank" style="color:#38bdf8;text-decoration:none;">Player11132</a> (CC-BY 3.0)</div>
+          <div>• <b>Tree Collection</b> by <a href="https://poly.pizza/bundle/Tree-Collection-zdry8l7ugJ" target="_blank" style="color:#38bdf8;text-decoration:none;">NicolasBrueckner</a> (CC-BY 3.0)</div>
+          <div>• <b>City Kit &amp; Suburban Houses</b> by <a href="https://kenney.nl" target="_blank" style="color:#38bdf8;text-decoration:none;">Kenney</a> (CC0)</div>
+          <div>• <b>Vehicles &amp; Medieval/Farm Bundles</b> by <a href="https://poly.pizza/u/Quaternius" target="_blank" style="color:#38bdf8;text-decoration:none;">Quaternius</a> (CC0)</div>
         </div>
       </div>
 
@@ -453,6 +475,15 @@ export class Hud {
       this.preset = presetSel.value as Preset;
       localStorage.setItem(LS_PRESET, this.preset);
       this.cb.onPreset(this.preset);
+    });
+
+    const weatherSel = hud.querySelector('#hr-weather') as HTMLSelectElement;
+    const savedWeather = (localStorage.getItem('hr_weather') || 'day') as 'day' | 'sunset' | 'night' | 'rain';
+    weatherSel.value = savedWeather;
+    weatherSel.addEventListener('change', () => {
+      const w = weatherSel.value as 'day' | 'sunset' | 'night' | 'rain';
+      localStorage.setItem('hr_weather', w);
+      this.cb.onWeather?.(w);
     });
 
     const autoBox = hud.querySelector('#hr-auto') as HTMLInputElement;

@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { absZ, type TrafficCar } from '@hr/simulation';
 import { createCarMesh } from './CarMesh';
+import { assetLoader } from './AssetLoader';
 
 export const TRAFFIC_COLORS = [
-  0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71, 0x9b59b6, 0xe67e22, 0x34495e, 0xf8fafc
+  0xef4444, 0x0284c7, 0xeab308, 0x10b981, 0xf8fafc, 0xf97316, 0x8b5cf6, 0x94a3b8
 ];
 
 export class TrafficRenderer {
@@ -17,12 +18,17 @@ export class TrafficRenderer {
     for (const car of cars) {
       let mesh = this.pool.get(car.id);
       if (!mesh) {
-        const types: ('sedan' | 'suv' | 'van')[] = ['sedan', 'suv', 'van', 'sedan'];
-        const type = types[car.id % types.length];
-        mesh = createCarMesh({
-          color: TRAFFIC_COLORS[car.colorIndex % TRAFFIC_COLORS.length],
-          type
-        });
+        const glbCar = assetLoader.createTrafficCarInstance(car.modelIndex ?? (car.id % 12));
+        if (glbCar) {
+          mesh = glbCar;
+        } else {
+          const color = TRAFFIC_COLORS[car.colorIndex % TRAFFIC_COLORS.length];
+          const types: ('sedan' | 'suv' | 'hatchback' | 'van')[] = ['sedan', 'suv', 'hatchback', 'van'];
+          const type = types[car.id % types.length];
+          mesh = createCarMesh({ color, type });
+          mesh.userData.isProcedural = true;
+        }
+
         mesh.traverse((o) => {
           if (o instanceof THREE.Mesh) o.castShadow = true;
         });
@@ -38,24 +44,31 @@ export class TrafficRenderer {
       if (!this.used.has(id)) mesh.visible = false;
     }
 
-    // Prune unused meshes to prevent unbounded memory growth in long runs
+    // Prune unused meshes from scene to keep pool lean without destroying shared GLTF assets
     if (this.pool.size > 50) {
       for (const [id, mesh] of this.pool) {
         if (!this.used.has(id)) {
           this.scene.remove(mesh);
-          mesh.traverse((o) => {
-            if (o instanceof THREE.Mesh) {
-              o.geometry?.dispose();
-              if (Array.isArray(o.material)) {
-                for (const m of o.material) m.dispose();
-              } else if (o.material) {
-                o.material.dispose();
-              }
-            }
-          });
+          // If procedural fallback mesh, dispose geometry and materials
+          if (mesh.userData?.isProcedural) {
+            disposeHierarchy(mesh);
+          }
           this.pool.delete(id);
         }
       }
     }
   }
+}
+
+function disposeHierarchy(obj: THREE.Object3D): void {
+  obj.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.geometry?.dispose();
+      if (Array.isArray(child.material)) {
+        for (const m of child.material) m.dispose();
+      } else if (child.material) {
+        child.material.dispose();
+      }
+    }
+  });
 }

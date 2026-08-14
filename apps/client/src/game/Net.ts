@@ -100,6 +100,7 @@ export class Net {
           this.rejoinRoom(saved.roomId, saved.token).then((r) => {
             if (!r.ok && (r.error === 'rejoin expired' || r.error === 'bad request')) {
               localStorage.removeItem(LS_ROOM);
+              localStorage.removeItem(LS_TOKEN);
               this.cb.onRejoinFailed();
             }
           });

@@ -183,16 +183,78 @@ export class TrafficSpawner {
   }
 
   private pushCar(laneIndex: number, roadDist: number): void {
-    const speed = TRAFFIC_SPEED_MIN + this.rng() * (TRAFFIC_SPEED_MAX - TRAFFIC_SPEED_MIN);
+    const modelIndex = Math.floor(this.rng() * 18);
+    // Authentic speed profiles across 18 unique vehicle archetypes
+    let minSpd = TRAFFIC_SPEED_MIN;
+    let maxSpd = TRAFFIC_SPEED_MAX;
+    if (modelIndex === 0) {
+      // Nissan GT-R Track Monster (128 - 148 km/h)
+      minSpd = 35.5; maxSpd = 41.0;
+    } else if (modelIndex === 1) {
+      // Aero Supercar / Lambo (124 - 142 km/h)
+      minSpd = 34.5; maxSpd = 39.5;
+    } else if (modelIndex === 2) {
+      // Highway Patrol Police Interceptor (122 - 140 km/h)
+      minSpd = 34.0; maxSpd = 39.0;
+    } else if (modelIndex === 3) {
+      // Mazda RX-7 Rotary Sports (120 - 138 km/h)
+      minSpd = 33.5; maxSpd = 38.5;
+    } else if (modelIndex === 4) {
+      // Dodge Challenger V8 Muscle (118 - 135 km/h)
+      minSpd = 33.0; maxSpd = 37.5;
+    } else if (modelIndex === 5) {
+      // 180SX Drift Tuner (112 - 128 km/h)
+      minSpd = 31.0; maxSpd = 35.5;
+    } else if (modelIndex === 6) {
+      // Sports Convertible (110 - 126 km/h)
+      minSpd = 30.5; maxSpd = 35.0;
+    } else if (modelIndex === 7) {
+      // Toyota Trueno AE86 (106 - 124 km/h)
+      minSpd = 29.5; maxSpd = 34.5;
+    } else if (modelIndex === 8) {
+      // Ignition GT Coupe (102 - 118 km/h)
+      minSpd = 28.5; maxSpd = 33.0;
+    } else if (modelIndex === 9) {
+      // Classic V8 Muscle (98 - 114 km/h)
+      minSpd = 27.0; maxSpd = 31.5;
+    } else if (modelIndex === 10) {
+      // Emergency Ambulance (95 - 112 km/h)
+      minSpd = 26.5; maxSpd = 31.0;
+    } else if (modelIndex === 11) {
+      // Executive Sport Sedan (92 - 108 km/h)
+      minSpd = 25.5; maxSpd = 30.0;
+    } else if (modelIndex === 12) {
+      // Family Sedan (84 - 98 km/h)
+      minSpd = 23.5; maxSpd = 27.5;
+    } else if (modelIndex === 13) {
+      // Pastel Sedan (80 - 95 km/h)
+      minSpd = 22.0; maxSpd = 26.5;
+    } else if (modelIndex === 14) {
+      // Metropolis Taxi (78 - 92 km/h)
+      minSpd = 21.5; maxSpd = 25.5;
+    } else if (modelIndex === 15) {
+      // City Yellow Taxi (74 - 88 km/h)
+      minSpd = 20.5; maxSpd = 24.5;
+    } else if (modelIndex === 16) {
+      // Mitsubishi L200 Pickup Truck (72 - 86 km/h)
+      minSpd = 20.0; maxSpd = 24.0;
+    } else {
+      // Urban SUV / Minivan (68 - 82 km/h)
+      minSpd = 19.0; maxSpd = 23.0;
+    }
+
+    const speed = minSpd + this.rng() * (maxSpd - minSpd);
+    const isBig = modelIndex === 10 || modelIndex === 16 || modelIndex === 17;
+    const isSport = modelIndex <= 8;
     this.cars.push({
       id: this.nextId++,
       lane: laneCoordinate(laneIndex),
       x: laneCenterX(laneCoordinate(laneIndex)) + (this.rng() * 2 - 1) * TRAFFIC_LANE_DRIFT,
       roadDist,
       speed,
-      length: CAR_LENGTH * (0.95 + this.rng() * 0.15),
-      width: CAR_WIDTH * (0.95 + this.rng() * 0.1),
-      modelIndex: Math.floor(this.rng() * 4),
+      length: CAR_LENGTH * (isBig ? 1.15 : isSport ? 0.96 : 1.0),
+      width: CAR_WIDTH * (isBig ? 1.08 : 1.0),
+      modelIndex,
       colorIndex: Math.floor(this.rng() * 8)
     });
   }
