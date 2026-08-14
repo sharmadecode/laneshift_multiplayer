@@ -1,5 +1,12 @@
 import * as THREE from 'three';
-import { LANE_COUNT, LANE_WIDTH, ROAD_HALF_WIDTH } from '@hr/shared';
+import {
+  LANE_COUNT,
+  LANE_WIDTH,
+  ROAD_HALF_WIDTH,
+  getTrackCurvature,
+  getCurveOffset,
+  getCurveYaw
+} from '@hr/shared';
 import { assetLoader } from './AssetLoader';
 
 const ROAD_HALF = ROAD_HALF_WIDTH;
@@ -20,6 +27,8 @@ export interface RoadOptions {
 interface SceneryProp {
   obj: THREE.Object3D;
   initZ: number;
+  baseX: number;
+  baseRotY: number;
   period: number;
 }
 
@@ -30,6 +39,9 @@ export class Road {
   private groundTex!: THREE.CanvasTexture;
   private sidewalkTex!: THREE.CanvasTexture;
   private grassTex!: THREE.CanvasTexture;
+  private groundGeo!: THREE.PlaneGeometry;
+  private sidewalkGeos: { geo: THREE.PlaneGeometry; baseOffset: number }[] = [];
+  private terrainGeo!: THREE.PlaneGeometry;
   private scrollers: FastScroller[] = [];
   private sceneryProps: SceneryProp[] = [];
   private dynamicSceneryGroup = new THREE.Group();
@@ -284,29 +296,42 @@ export class Road {
   }
 
   update(scroll: number, playerX = 0, playerDist = 0): void {
-    // Ultra-fast direct Float32Array matrix scroller (zero GC allocations)
+    // 1. Ultra-fast direct Float32Array matrix scroller with curve offsets (zero GC allocations)
     for (let i = 0; i < this.scrollers.length; i++) {
-      this.scrollers[i].update(scroll);
+      this.scrollers[i].update(scroll, playerDist);
     }
 
-    // Scroll 3D Scenery props
+    // 2. Scroll & curve 3D Scenery props (landmarks, towers, houses, shops, barns)
     for (let i = 0; i < this.sceneryProps.length; i++) {
       const p = this.sceneryProps[i];
       p.obj.position.z += scroll;
       if (p.obj.position.z > SCENERY_BACK) {
         p.obj.position.z -= p.period;
       }
+      const relDepth = Math.max(0, -p.obj.position.z);
+      const curveX = getCurveOffset(playerDist, relDepth);
+      const curveYaw = getCurveYaw(playerDist, relDepth);
+      p.obj.position.x = p.baseX + curveX;
+      p.obj.rotation.y = p.baseRotY + curveYaw;
     }
 
-    // Scroll parallel railway train
+    // 3. Scroll parallel railway train with road curve
     if (this.trainGroup) {
       this.trainGroup.position.z += scroll * 0.45;
       if (this.trainGroup.position.z > SCENERY_BACK + 100) {
         this.trainGroup.position.z -= SCENERY_PERIOD;
       }
+      const trainDepth = Math.max(0, -this.trainGroup.position.z);
+      const curveX = getCurveOffset(playerDist, trainDepth);
+      const curveYaw = getCurveYaw(playerDist, trainDepth);
+      this.trainGroup.position.x = -68 + curveX;
+      this.trainGroup.rotation.y = curveYaw;
     }
 
-    // Zero-drift deterministic texture offset directly calculated from player distance
+    // 4. Update GPU Ground, Sidewalk & Meadow Mesh Curves
+    this.updateGroundPlaneCurves(playerDist);
+
+    // 5. Zero-drift deterministic texture offset directly calculated from player distance
     this.groundTex.offset.y = (playerDist / TILE_LEN) % 1;
     this.sidewalkTex.offset.y = (playerDist / 20) % 1;
     this.grassTex.offset.y = (playerDist / 100) % 1;
@@ -328,6 +353,62 @@ export class Road {
         }
       }
       this.rainGeo.attributes.position.needsUpdate = true;
+    }
+  }
+
+  private updateGroundPlaneCurves(playerDist: number): void {
+    const SEGMENTS = 80;
+    // 1. Asphalt Road Surface
+    if (this.groundGeo) {
+      const pos = this.groundGeo.attributes.position.array as Float32Array;
+      for (let r = 0; r <= SEGMENTS; r++) {
+        const localY = (0.5 - r / SEGMENTS) * GROUND_LEN;
+        const worldZ = GROUND_CENTER - localY;
+        const depth = Math.max(0, -worldZ);
+        const curveX = getCurveOffset(playerDist, depth);
+
+        const vLeft = r * 2;
+        const vRight = r * 2 + 1;
+        pos[vLeft * 3] = -ROAD_HALF + curveX;
+        pos[vRight * 3] = ROAD_HALF + curveX;
+      }
+      this.groundGeo.attributes.position.needsUpdate = true;
+    }
+
+    // 2. Sidewalk Boulevards
+    const sideWidth = 14;
+    for (const item of this.sidewalkGeos) {
+      const pos = item.geo.attributes.position.array as Float32Array;
+      const baseCenter = item.baseOffset;
+      for (let r = 0; r <= SEGMENTS; r++) {
+        const localY = (0.5 - r / SEGMENTS) * GROUND_LEN;
+        const worldZ = GROUND_CENTER - localY;
+        const depth = Math.max(0, -worldZ);
+        const curveX = getCurveOffset(playerDist, depth);
+
+        const vLeft = r * 2;
+        const vRight = r * 2 + 1;
+        pos[vLeft * 3] = baseCenter - sideWidth / 2 + curveX;
+        pos[vRight * 3] = baseCenter + sideWidth / 2 + curveX;
+      }
+      item.geo.attributes.position.needsUpdate = true;
+    }
+
+    // 3. Meadow Terrain
+    if (this.terrainGeo) {
+      const pos = this.terrainGeo.attributes.position.array as Float32Array;
+      for (let r = 0; r <= SEGMENTS; r++) {
+        const localY = (0.5 - r / SEGMENTS) * GROUND_LEN;
+        const worldZ = GROUND_CENTER - localY;
+        const depth = Math.max(0, -worldZ);
+        const curveX = getCurveOffset(playerDist, depth);
+
+        const vLeft = r * 2;
+        const vRight = r * 2 + 1;
+        pos[vLeft * 3] = -275 + curveX;
+        pos[vRight * 3] = 275 + curveX;
+      }
+      this.terrainGeo.attributes.position.needsUpdate = true;
     }
   }
 
@@ -421,8 +502,9 @@ export class Road {
       metalness: 0.1
     });
 
+    this.groundGeo = new THREE.PlaneGeometry(ROAD_HALF * 2, GROUND_LEN, 1, 80);
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(ROAD_HALF * 2, GROUND_LEN),
+      this.groundGeo,
       this.asphaltMat
     );
     ground.rotation.x = -Math.PI / 2;
@@ -463,14 +545,19 @@ export class Road {
       color: 0xe2e8f0
     });
 
+    this.sidewalkGeos = [];
     const sideWidth = 14; // 14m wide sidewalk from X=8m to X=22m
     for (const side of [-1, 1]) {
+      const walkGeo = new THREE.PlaneGeometry(sideWidth, GROUND_LEN, 1, 80);
+      const baseOffset = side * (ROAD_HALF + sideWidth / 2);
+      this.sidewalkGeos.push({ geo: walkGeo, baseOffset });
+
       const walkMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(sideWidth, GROUND_LEN),
+        walkGeo,
         this.sidewalkMat
       );
       walkMesh.rotation.x = -Math.PI / 2;
-      walkMesh.position.set(side * (ROAD_HALF + sideWidth / 2), -0.04, GROUND_CENTER);
+      walkMesh.position.set(0, -0.04, GROUND_CENTER);
       walkMesh.receiveShadow = true;
       g.add(walkMesh);
     }
@@ -503,7 +590,8 @@ export class Road {
       color: 0x4caf50
     });
 
-    const terrain = new THREE.Mesh(new THREE.PlaneGeometry(550, GROUND_LEN), mat);
+    this.terrainGeo = new THREE.PlaneGeometry(550, GROUND_LEN, 1, 80);
+    const terrain = new THREE.Mesh(this.terrainGeo, mat);
     terrain.rotation.x = -Math.PI / 2;
     terrain.position.set(0, -0.06, GROUND_CENTER);
     terrain.receiveShadow = true;
@@ -711,7 +799,7 @@ export class Road {
         }
       });
       this.dynamicSceneryGroup.add(obj);
-      this.sceneryProps.push({ obj, initZ: z, period: SCENERY_PERIOD });
+      this.sceneryProps.push({ obj, initZ: z, baseX: x, baseRotY: rotY, period: SCENERY_PERIOD });
     };
 
     // 16 Landmark buildings spaced every 125m across the 5 Biomes
@@ -838,10 +926,11 @@ export class Road {
 /**
  * Ultra-fast direct Float32Array matrix scroller.
  * Directly increments the Z coordinate in instanceMatrix column-major buffer
- * (matrix index 14) without CPU decompose/compose/Matrix4 overhead.
+ * (matrix index 14) and applies dynamic road curvature offsets along the spline.
  */
 class FastScroller {
   private array: Float32Array;
+  private basePositions: Float32Array;
 
   constructor(
     private mesh: THREE.InstancedMesh,
@@ -850,19 +939,29 @@ class FastScroller {
     private period: number
   ) {
     this.array = mesh.instanceMatrix.array as Float32Array;
+    this.basePositions = new Float32Array(count * 2);
+    for (let i = 0; i < count; i++) {
+      this.basePositions[i * 2] = this.array[i * 16 + 12];
+      this.basePositions[i * 2 + 1] = this.array[i * 16 + 13];
+    }
   }
 
-  update(scroll: number): void {
+  update(scroll: number, playerDist = 0): void {
     const arr = this.array;
+    const base = this.basePositions;
     const count = this.count;
     const backZ = this.backZ;
     const period = this.period;
 
     for (let i = 0; i < count; i++) {
-      const idx = i * 16 + 14;
-      let z = arr[idx] + scroll;
+      const idx = i * 16;
+      let z = arr[idx + 14] + scroll;
       if (z > backZ) z -= period;
-      arr[idx] = z;
+      arr[idx + 14] = z;
+
+      const relDepth = Math.max(0, -z);
+      const curveX = getCurveOffset(playerDist, relDepth);
+      arr[idx + 12] = base[i * 2] + curveX;
     }
     this.mesh.instanceMatrix.needsUpdate = true;
   }

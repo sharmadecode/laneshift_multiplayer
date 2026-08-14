@@ -8,7 +8,8 @@ import {
   LANE_RANGE,
   PLAYER_MAX_SPEED,
   START_SPEED,
-  STEER_RESPONSE
+  STEER_RESPONSE,
+  getTrackCurvature
 } from '@hr/shared';
 
 export interface InputState {
@@ -111,17 +112,22 @@ export function stepPlayer(v: VehicleState, input: InputState, dt: number): Vehi
   const oldSteer = v.steering;
   v.steering += (targetSteer - v.steering) * k;
 
-  // Responsive arcade lateral control: sharp, immediate lane switching with zero float
+  // Responsive arcade lateral control + road curve centrifugal force
   const speedGripFactor = Math.min(1.0, Math.max(0, (v.speed - 1.0) / 4.0));
   const lateralVel = v.steering * LATERAL_SPEED * (0.6 + 0.4 * speedNorm) * speedGripFactor;
-  v.x += lateralVel * dt;
+
+  // Centrifugal force pushes outward (e.g. curve > 0 means right turn -> car naturally drifts left unless steered)
+  const curve = getTrackCurvature(v.distance);
+  const centrifugalForce = -curve * Math.pow(speedNorm, 1.25) * 5.2;
+
+  v.x += (lateralVel + centrifugalForce) * dt;
   if (Math.abs(v.x) > LANE_RANGE) {
     v.x = Math.sign(v.x) * LANE_RANGE;
   }
 
-  // Lateral G-Force calculation
+  // Lateral G-Force calculation reflecting steering + curve inertia
   const steerDelta = (v.steering - oldSteer) / Math.max(0.001, dt);
-  const rawLateralG = (v.steering * (v.speed / 28) + steerDelta * 0.08);
+  const rawLateralG = (v.steering * (v.speed / 28) + steerDelta * 0.08) + curve * (v.speed / 26);
   v.lateralG += (rawLateralG - v.lateralG) * (1 - Math.exp(-14 * dt));
 
   // --- 4. Suspension Spring-Damper Dynamics ---

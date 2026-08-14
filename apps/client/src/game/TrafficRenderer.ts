@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { absZ, type TrafficCar } from '@hr/simulation';
+import { getCurveOffset, getCurveYaw } from '@hr/shared';
 import { createCarMesh } from './CarMesh';
 import { assetLoader } from './AssetLoader';
 
@@ -36,7 +37,11 @@ export class TrafficRenderer {
         this.pool.set(car.id, mesh);
       }
       mesh.visible = true;
-      mesh.position.set(car.x, 0, absZ(car, playerDist));
+      const z = absZ(car, playerDist);
+      const curveX = getCurveOffset(playerDist, -z);
+      const curveYaw = getCurveYaw(playerDist, -z);
+      mesh.position.set(car.x + curveX, 0, z);
+      mesh.rotation.y = Math.PI - curveYaw;
       this.used.add(car.id);
     }
 

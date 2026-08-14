@@ -1,5 +1,13 @@
 import * as THREE from 'three';
-import { PLAYER_MAX_SPEED, STEER_ROLL, STEER_YAW } from '@hr/shared';
+import {
+  CAR_LENGTH,
+  CAR_WIDTH,
+  PLAYER_MAX_SPEED,
+  STEER_ROLL,
+  STEER_YAW,
+  getTrackCurvature,
+  getCurveOffset
+} from '@hr/shared';
 import { createVehicle, stepPlayer, type InputState, type VehicleState } from '@hr/simulation';
 import { createCarMesh } from './CarMesh';
 import { assetLoader } from './AssetLoader';
@@ -134,11 +142,12 @@ export class Player {
     } else {
       const f = rs / PLAYER_MAX_SPEED;
       const motionGrip = Math.min(1.0, Math.max(0, rs / 5.0));
-      // Grounded sports car suspension: tight body roll keeps all 4 tires firmly glued to the asphalt
+      const currentCurve = getTrackCurvature(s.distance);
+      // Grounded sports car suspension: tight body roll + curve lean keeps car glued to asphalt
       m.rotation.x = THREE.MathUtils.lerp(m.rotation.x, s.pitch * 0.35, 16 * dt);
-      const targetRoll = (-rSteer * STEER_ROLL * (0.4 + 0.6 * f) + s.roll * 0.15) * motionGrip;
+      const targetRoll = (-rSteer * STEER_ROLL * (0.4 + 0.6 * f) + s.roll * 0.15 - currentCurve * 0.045) * motionGrip;
       m.rotation.z = THREE.MathUtils.lerp(m.rotation.z, targetRoll, 18 * dt);
-      m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, -rSteer * STEER_YAW * (0.4 + 0.6 * f) * motionGrip, 16 * dt);
+      m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, (-rSteer * STEER_YAW * (0.4 + 0.6 * f) - currentCurve * 0.04) * motionGrip, 16 * dt);
     }
 
     // Wheel spin & active steering yaw on front wheels
@@ -194,8 +203,9 @@ export class Player {
       this.shake = 0;
     }
 
-    // Smoothly damped look-ahead target (eliminates instant camera snap on keypress)
-    const targetLookX = rx * 0.9 - rSteer * 0.35;
+    // Smoothly damped apex look-ahead camera tracking
+    const apexOffset = getCurveOffset(s.distance, 50);
+    const targetLookX = rx * 0.9 + apexOffset * 0.72 - rSteer * 0.35;
     this.lookTarget.x = THREE.MathUtils.lerp(this.lookTarget.x, targetLookX, 12 * dt);
     this.camera.lookAt(this.lookTarget.x, lookHeight, lookAhead);
 
