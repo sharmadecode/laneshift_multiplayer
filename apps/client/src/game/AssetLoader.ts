@@ -11,7 +11,8 @@ export class AssetLoader {
   private loadCallbacks: (() => void)[] = [];
 
   constructor() {
-    this.dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+    // Local decoder: works offline and on LAN (no gstatic dependency)
+    this.dracoLoader.setDecoderPath('/draco/');
     this.gltfLoader.setDRACOLoader(this.dracoLoader);
   }
 
@@ -27,13 +28,15 @@ export class AssetLoader {
         metalness: 0.72,
         roughness: 0.26,
         clearcoat: 1.0,
-        clearcoatRoughness: 0.08
+        clearcoatRoughness: 0.08,
+        envMapIntensity: 0.65
       });
 
       const detailsMat = new THREE.MeshStandardMaterial({
         color: 0x1e222d,
         metalness: 0.85,
-        roughness: 0.2
+        roughness: 0.2,
+        envMapIntensity: 0.5
       });
 
       const glassMat = new THREE.MeshPhysicalMaterial({
@@ -41,13 +44,15 @@ export class AssetLoader {
         metalness: 0.88,
         roughness: 0.04,
         clearcoat: 1.0,
-        clearcoatRoughness: 0.02
+        clearcoatRoughness: 0.02,
+        envMapIntensity: 0.9
       });
 
       const wheelMat = new THREE.MeshStandardMaterial({
         color: 0xe2e8f0,
         metalness: 0.92,
-        roughness: 0.15
+        roughness: 0.15,
+        envMapIntensity: 0.4
       });
 
       const wheels: THREE.Object3D[] = [];
@@ -62,14 +67,31 @@ export class AssetLoader {
             child.material = bodyMat;
           } else if (name.includes('glass')) {
             child.material = glassMat;
-          } else if (name.includes('wheel') || name.includes('rim')) {
+          } else if ((name.includes('wheel') || name.includes('rim')) && !name.startsWith('steering')) {
             child.material = wheelMat;
-            wheels.push(child);
-          } else if (name.includes('trim') || name.includes('carbon') || name.includes('grille')) {
+          } else if (name.includes('trim') || name.includes('carbon') || name.includes('grille') || name.includes('grill')) {
             child.material = detailsMat;
           }
         }
+
+        // Spin wheels: the four outer wheel assemblies only (steering wheel and
+        // inner parts excluded, so nothing else is animated).
+        const name = child.name.toLowerCase();
+        if (name.startsWith('wheel_')) wheels.push(child);
       });
+      // Fallback for models that name their wheels differently.
+      if (!wheels.length) {
+        car.traverse((child) => {
+          const name = child.name.toLowerCase();
+          if ((name.includes('wheel') || name.includes('rim')) && !name.startsWith('steering')) wheels.push(child);
+        });
+      }
+
+      // Reorient the model to the game frame (forward = -Z, up = +Y). The
+      // exported asset carries a 120° diagonal rotation on the body node (the
+      // wheels are separate, unrotated siblings), so the correction must be
+      // computed from named parts and applied to the whole model.
+      this.reorientToGameFrame(car, wheels);
 
       // Normalize size to standard car dimensions (~1.9m width, 4.4m length)
       const box = new THREE.Box3().setFromObject(car);
@@ -78,11 +100,11 @@ export class AssetLoader {
       const targetLength = 4.4;
       const scale = targetLength / Math.max(size.x, size.z);
       car.scale.set(scale, scale, scale);
-
-      // Re-center bounding box
-      const center = new THREE.Vector3();
-      box.getCenter(center);
-      car.position.set(0, 0, 0);
+      // Keep the wheels on the ground: the model origin may sit at its own
+      // arbitrary height, so snap the car down until the lowest point touches y=0.
+      car.updateMatrixWorld(true);
+      const box2 = new THREE.Box3().setFromObject(car);
+      if (box2.min.y < 0) car.position.y -= box2.min.y;
 
       // Add contact ambient occlusion ground shadow
       const shadowCv = document.createElement('canvas');
@@ -117,6 +139,74 @@ export class AssetLoader {
     }
   }
 
+  /**
+   * Fixes the exported model's broken orientation. The asset was authored
+   * upright (wheels coplanar on the ground, body aligned), but the body node
+   * carries a spurious 120° diagonal rotation while the wheels are separate,
+   * unrotated siblings. Undo that rotation on the body node, then flip the
+   * whole car 180° about Y if the nose ends up facing +Z (the game drives
+   * toward -Z).
+   */
+  private reorientToGameFrame(car: THREE.Group, wheels: THREE.Object3D[]): void {
+    car.updateMatrixWorld(true);
+
+    // Sanity: the authored model must sit upright, i.e. all wheel centers at
+    // roughly the same height.
+    const wheelYs = wheels.map((w) => {
+      const p = new THREE.Vector3();
+      w.getWorldPosition(p);
+      return p.y;
+    });
+    const y0 = wheelYs[0] ?? 0;
+    if (wheels.length < 4 || wheelYs.some((y) => Math.abs(y - y0) > 0.5)) {
+      console.warn('[AssetLoader] Wheels not coplanar, keeping model as-is.');
+      return;
+    }
+
+    // The node carrying the spurious rotation: the top-most ancestor of the
+    // body mesh under the root.
+    let bodyMesh: THREE.Object3D | null = null;
+    car.traverse((child) => {
+      if (!bodyMesh && child instanceof THREE.Mesh && child.name.toLowerCase().includes('body')) bodyMesh = child;
+    });
+    if (!bodyMesh) {
+      console.warn('[AssetLoader] Body anchor missing, keeping model as-is.');
+      return;
+    }
+    let bodyNode: THREE.Object3D = bodyMesh;
+    while (bodyNode.parent && bodyNode.parent !== car) bodyNode = bodyNode.parent;
+    // The authored body runs lengthwise along X (nose -X), but the wheels sit
+    // along Z. Rotate the body 90° about Y to align with the wheels: length
+    // along Z, nose -Z.
+    bodyNode.quaternion.setFromAxisAngle(new THREE.Vector3(0, -1, 0), Math.PI / 2);
+    car.updateMatrixWorld(true);
+
+    // Nose direction: front lights/grilles minus rear lights.
+    let front: THREE.Object3D | null = null;
+    let rear: THREE.Object3D | null = null;
+    car.traverse((child) => {
+      const name = child.name.toLowerCase();
+      if (!front && (name.includes('grill') || name.includes('lights')) && !name.includes('lights_red')) front = child;
+      if (!rear && name.includes('lights_red')) rear = child;
+    });
+    if (front && rear) {
+      // TS narrows these to "never" (closure assignments are not tracked);
+      // the guard guarantees they are non-null at runtime.
+      const f = front as THREE.Object3D;
+      const r = rear as THREE.Object3D;
+      const nose = new THREE.Vector3();
+      f.getWorldPosition(nose);
+      const rp = new THREE.Vector3();
+      r.getWorldPosition(rp);
+      nose.sub(rp);
+      nose.y = 0;
+      if (nose.z > 0) {
+        car.rotation.y = Math.PI;
+        car.updateMatrixWorld(true);
+      }
+    }
+  }
+
   onReady(cb: () => void): void {
     if (this.isLoaded) cb();
     else this.loadCallbacks.push(cb);
@@ -126,21 +216,31 @@ export class AssetLoader {
   createHeroCarInstance(color = 0xeb3b5a): THREE.Group | null {
     if (!this.heroCarTemplate) return null;
     const cloned = this.heroCarTemplate.clone(true);
+
+    // The source GLB's nose is authored along -X, while Highway Rush uses +Z
+    // as forward. Rotate the complete instance once so body, wheels, lights,
+    // and its contact shadow all follow the road rather than pointing left.
+    cloned.rotation.y = Math.PI / 2;
+
     const bodyMat = (this.heroCarTemplate.userData.bodyMaterial as THREE.MeshPhysicalMaterial).clone();
     bodyMat.color.setHex(color);
 
-    const wheels: THREE.Object3D[] = [];
+const wheels: THREE.Object3D[] = [];
     cloned.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         if (o.material === this.heroCarTemplate?.userData.bodyMaterial) {
           o.material = bodyMat;
         }
-        const name = o.name.toLowerCase();
-        if (name.includes('wheel') || name.includes('rim')) {
-          wheels.push(o);
-        }
       }
+      const name = o.name.toLowerCase();
+      if (name.startsWith('wheel_')) wheels.push(o);
     });
+    if (!wheels.length) {
+      cloned.traverse((o) => {
+        const name = o.name.toLowerCase();
+        if ((name.includes('wheel') || name.includes('rim')) && !name.startsWith('steering')) wheels.push(o);
+      });
+    }
 
     cloned.userData.bodyMaterial = bodyMat;
     cloned.userData.wheels = wheels;

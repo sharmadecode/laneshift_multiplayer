@@ -28,11 +28,64 @@ export class Road {
   private grassTex!: THREE.CanvasTexture;
   private scrollers: MatrixScroller[] = [];
   private cloudsGroup = new THREE.Group();
+  private skyDome!: THREE.Mesh;
+
+  /** Radially-tiled gradient sky dome with a bright sun disc. Fog-immune so it
+   *  always reads as the true sky at any distance. */
+  private buildSkyDome(scene: THREE.Scene): void {
+    const domeGeo = new THREE.SphereGeometry(1, 48, 20);
+    const domeMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      uniforms: {
+        topColor: { value: new THREE.Color(0x1e63b5) },
+        horizonColor: { value: new THREE.Color(0xbfe3ff) },
+        sunColor: { value: new THREE.Color(0xfff2d0) },
+        sunDir: { value: new THREE.Vector3(0.52, 0.76, -0.32).normalize() }
+      },
+      vertexShader: `
+        varying vec3 vDir;
+        void main() {
+          vDir = normalize(position);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 topColor;
+        uniform vec3 horizonColor;
+        uniform vec3 sunColor;
+        uniform vec3 sunDir;
+        varying vec3 vDir;
+        void main() {
+          float h = vDir.y * 0.5 + 0.5;
+          vec3 sky = mix(horizonColor, topColor, pow(clamp(h, 0.0, 1.0), 0.62));
+          float s = max(dot(vDir, sunDir), 0.0);
+          sky += sunColor * (pow(s, 220.0) * 3.0 + pow(s, 24.0) * 0.45 + pow(s, 6.0) * 0.12);
+          gl_FragColor = vec4(sky, 1.0);
+        }
+      `
+    });
+    this.skyDome = new THREE.Mesh(domeGeo, domeMat);
+    this.skyDome.position.set(0, 40, 0);
+    this.skyDome.scale.setScalar(900);
+    this.skyDome.renderOrder = -10;
+    scene.add(this.skyDome);
+  }
+
+  /** Keeps the dome just inside the camera far plane so it is never clipped. */
+  setFar(far: number): void {
+    this.skyDome.scale.setScalar(Math.max(300, far * 0.92));
+  }
 
   constructor(scene: THREE.Scene, opts: RoadOptions) {
     // --- Summer Afternoon Atmospheric Sky ---
-    scene.background = new THREE.Color(0x4fa0ea);
-    scene.fog = new THREE.FogExp2(0x8ec2f0, 0.002);
+    // Background and fog share the horizon color so the world melts into the
+    // sky seamlessly; the gradient dome does the actual painting.
+    const horizonColor = 0xbfe3ff;
+    scene.background = new THREE.Color(horizonColor);
+    scene.fog = new THREE.FogExp2(horizonColor, 0.002);
+    this.buildSkyDome(scene);
 
     // --- Warm Golden Sun Lighting ---
     const hemi = new THREE.HemisphereLight(0x8acdfa, 0x5ea83c, 0.95);
@@ -68,16 +121,30 @@ export class Road {
   }
 
   /** Advance the scenery by scroll meters (world moves toward +Z). */
-  update(scroll: number): void {
+  update(scroll: number, playerX = 0, playerZ = 0): void {
     for (const s of this.scrollers) s.update(scroll);
     this.groundTex.offset.y = (this.groundTex.offset.y + scroll / TILE_LEN) % 1;
     this.grassTex.offset.y = (this.grassTex.offset.y + scroll / 48) % 1;
     this.cloudsGroup.position.z += scroll * 0.025;
     if (this.cloudsGroup.position.z > 250) this.cloudsGroup.position.z -= 500;
+
+    // Sun and its shadow frustum follow the player so shadow detail (and the
+    // sun highlight on the car) stay consistent at any distance.
+    this.sun.position.set(playerX + 65, 95, playerZ - 40);
+    this.sun.target.position.set(playerX, 0, playerZ);
+    this.sun.target.updateMatrixWorld();
   }
 
-  setShadows(on: boolean): void {
+  setShadows(on: boolean, mapSize = 2048): void {
     this.sun.castShadow = on;
+    this.sun.shadow.mapSize.set(on ? mapSize : 512, on ? mapSize : 512);
+    this.sun.shadow.camera.near = 10;
+    this.sun.shadow.camera.far = 420;
+    this.sun.shadow.camera.left = -130;
+    this.sun.shadow.camera.right = 130;
+    this.sun.shadow.camera.top = 130;
+    this.sun.shadow.camera.bottom = -130;
+    this.sun.shadow.bias = -0.0005;
   }
 
   /** Realistic, rich dark asphalt highway with crisp markings and tire tread wear. */

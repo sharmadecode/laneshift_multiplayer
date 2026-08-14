@@ -43,8 +43,31 @@ const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
   }
 });
 
+function allowedOrigin(origin: string | undefined, callback: (err: Error | null, origin?: string | boolean) => void): void {
+  // Non-browser clients (harnesses) send no origin.
+  if (!origin) {
+    callback(null, true);
+    return;
+  }
+  try {
+    const host = new URL(origin).hostname;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+      callback(null, true);
+      return;
+    }
+    // Private LAN hosts (dev: phone hits the PC's LAN IP)
+    if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) {
+      callback(null, true);
+      return;
+    }
+    callback(null, false);
+  } catch {
+    callback(null, false);
+  }
+}
+
 const io = new Server(httpServer, {
-  cors: { origin: true },
+  cors: { origin: allowedOrigin },
   maxHttpBufferSize: 1024
 });
 
@@ -53,11 +76,36 @@ const socketToPlayer = new Map<string, { playerId: string; roomId: string }>();
 const tokens = new Map<string, { playerId: string; roomId: string }>();
 const joinAttempts = new Map<string, number[]>();
 const rejoinAttempts = new Map<string, number[]>();
+const ipJoinAttempts = new Map<string, number[]>();
+const IP_JOIN_RATE_MAX = 30;
 
 function leaveOtherRooms(socket: ServerSocket): void {
   for (const r of socket.rooms) {
     if (r !== socket.id) socket.leave(r);
   }
+}
+
+/**
+ * Moves a socket from its current room (if any) into another, cleaning up the
+ * old room's player entry, its reconnect token, and its socket.io room
+ * membership. Guarantees exactly one room per socket at all times.
+ */
+function switchRoom(socket: ServerSocket, nextRoomId: string, nextPlayerId = socket.id): void {
+  const prev = socketToPlayer.get(socket.id);
+  if (prev && prev.roomId !== nextRoomId) {
+    const prevRoom = rooms.get(prev.roomId);
+    if (prevRoom) {
+      if (prevRoom.phase === 'racing' || prevRoom.phase === 'finished') {
+        // Mid-race: leave a reserved seat so the match still ends cleanly.
+        if (prevRoom.players.has(prev.playerId)) prevRoom.onDisconnect(prev.playerId);
+      } else {
+        prevRoom.removePlayer(prev.playerId);
+      }
+    }
+    removeTokenFor(prev.playerId);
+  }
+  leaveOtherRooms(socket);
+  socketToPlayer.set(socket.id, { playerId: nextPlayerId, roomId: nextRoomId });
 }
 
 function genCode(): string {
@@ -145,6 +193,13 @@ function rateLimited(bucket: Map<string, number[]>, socketId: string, max: numbe
   return false;
 }
 
+/** Per-socket AND per-IP join budget: socket ids are cheap to mint, IPs are not. */
+function joinRateLimited(socket: ServerSocket, now: number): boolean {
+  if (rateLimited(joinAttempts, socket.id, ROOM_JOIN_RATE_MAX, now)) return true;
+  const ip = socket.handshake.address;
+  return rateLimited(ipJoinAttempts, ip, IP_JOIN_RATE_MAX, now);
+}
+
 function removeTokenFor(playerId: string): void {
   for (const [token, info] of tokens) {
     if (info.playerId === playerId) tokens.delete(token);
@@ -158,7 +213,7 @@ io.on('connection', (socket) => {
 
   socket.on(NET_EVENTS.createRoom, (msg: unknown, ack?: (r: unknown) => void) => {
     const name = sanitizeName((msg as CreateRoomMsg)?.name);
-    if (!name || rateLimited(joinAttempts, socket.id, ROOM_JOIN_RATE_MAX, Date.now())) {
+    if (!name || joinRateLimited(socket, Date.now())) {
       ack?.({ ok: false, error: 'too many join attempts' });
       return;
     }
@@ -166,10 +221,9 @@ io.on('connection', (socket) => {
     const room = new Room((event, payload) => io.to(code).emit(event, payload), code);
     rooms.set(code, room);
     room.hostId = socket.id;
-    leaveOtherRooms(socket);
+    switchRoom(socket, code);
     socket.join(code);
     room.addPlayer(socket.id, name);
-    socketToPlayer.set(socket.id, { playerId: socket.id, roomId: code });
     const token = genToken();
     tokens.set(token, { playerId: socket.id, roomId: code });
     ack?.({ ok: true, token, roomId: code, playerId: socket.id });
@@ -178,7 +232,7 @@ io.on('connection', (socket) => {
   socket.on(NET_EVENTS.joinRoom, (msg: unknown, ack?: (r: unknown) => void) => {
     const name = sanitizeName((msg as JoinRoomMsg)?.name);
     const code = typeof (msg as JoinRoomMsg)?.code === 'string' ? (msg as JoinRoomMsg).code.trim().toUpperCase() : '';
-    if (!name || !/^[A-Z2-9]{5}$/.test(code) || rateLimited(joinAttempts, socket.id, ROOM_JOIN_RATE_MAX, Date.now())) {
+    if (!name || !/^[A-Z2-9]{5}$/.test(code) || joinRateLimited(socket, Date.now())) {
       ack?.({ ok: false, error: 'bad request' });
       return;
     }
@@ -191,14 +245,13 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: 'room full' });
       return;
     }
-    leaveOtherRooms(socket);
+    switchRoom(socket, code);
     socket.join(code);
     if (room.phase === 'racing' || room.phase === 'finished') {
       room.addJoiner(socket.id, name);
     } else {
       room.addPlayer(socket.id, name);
     }
-    socketToPlayer.set(socket.id, { playerId: socket.id, roomId: code });
     const token = genToken();
     tokens.set(token, { playerId: socket.id, roomId: code });
     if (room.lastResult && room.phase === 'finished') socket.emit(NET_EVENTS.matchResult, room.lastResult);
@@ -207,7 +260,7 @@ io.on('connection', (socket) => {
 
   socket.on(NET_EVENTS.quickJoin, (msg: unknown, ack?: (r: unknown) => void) => {
     const name = sanitizeName((msg as QuickJoinMsg)?.name);
-    if (!name || rateLimited(joinAttempts, socket.id, ROOM_JOIN_RATE_MAX, Date.now())) {
+    if (!name || joinRateLimited(socket, Date.now())) {
       ack?.({ ok: false, error: 'bad request' });
       return;
     }
@@ -218,24 +271,22 @@ io.on('connection', (socket) => {
       room.settings = { mode: 'endless', density: 1.0 };
       rooms.set(code, room);
       room.hostId = socket.id;
-      leaveOtherRooms(socket);
+      switchRoom(socket, code);
       socket.join(code);
       room.addPlayer(socket.id, name);
-      socketToPlayer.set(socket.id, { playerId: socket.id, roomId: code });
       const token = genToken();
       tokens.set(token, { playerId: socket.id, roomId: code });
       ack?.({ ok: true, token, roomId: code, playerId: socket.id });
       return;
     }
 
-    leaveOtherRooms(socket);
+    switchRoom(socket, target.code);
     socket.join(target.code);
     if (target.phase === 'racing' || target.phase === 'finished') {
       target.addJoiner(socket.id, name);
     } else {
       target.addPlayer(socket.id, name);
     }
-    socketToPlayer.set(socket.id, { playerId: socket.id, roomId: target.code });
     const token = genToken();
     tokens.set(token, { playerId: socket.id, roomId: target.code });
     if (target.lastResult && target.phase === 'finished') socket.emit(NET_EVENTS.matchResult, target.lastResult);
@@ -260,8 +311,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    socketToPlayer.set(socket.id, { playerId: info.playerId, roomId: room.code });
-    leaveOtherRooms(socket);
+    switchRoom(socket, room.code, info.playerId);
     socket.join(room.code);
     room.clearReservation(info.playerId);
     socket.emit(NET_EVENTS.roomState, room.toRoomState());
@@ -331,14 +381,29 @@ setInterval(() => {
   while (simAcc >= SIM_DT) {
     simAcc -= SIM_DT;
     for (const room of rooms.values()) {
-      room.tick(SIM_DT);
+      try {
+        room.tick(SIM_DT);
+      } catch (err) {
+        // One hostile/buggy room must never take down the whole server.
+        console.error(`[room ${room.code}] tick crashed, dropping room:`, err);
+        for (const pid of [...room.players.keys()]) removeTokenFor(pid);
+        rooms.delete(room.code);
+        continue;
+      }
       if (!room.players.size) {
-        for (const pid of room.players.keys()) removeTokenFor(pid);
+        for (const pid of [...room.players.keys()]) removeTokenFor(pid);
         rooms.delete(room.code);
       }
     }
   }
 }, 5);
+
+process.on('uncaughtException', (err) => {
+  console.error('uncaughtException:', err);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('unhandledRejection:', err);
+});
 
 httpServer.listen(PORT, () => {
   console.log(`LaneShifter multiplayer game server listening on :${PORT}`);

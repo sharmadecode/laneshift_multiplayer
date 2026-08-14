@@ -16,6 +16,8 @@ import {
   TRAFFIC_SPEED_MAX,
   TRAFFIC_SPEED_MIN,
   TRAFFIC_TAIL_SLOW,
+  TRAFFIC_DENSITY_MIN,
+  TRAFFIC_DENSITY_MAX,
   laneCenterX,
   laneCoordinate
 } from '@hr/shared';
@@ -212,5 +214,5 @@ export function absZ(car: TrafficCar, playerDist: number): number {
 }
 
 function clamp01(x: number): number {
-  return Math.max(0, Math.min(1, x));
+  return Math.max(TRAFFIC_DENSITY_MIN, Math.min(TRAFFIC_DENSITY_MAX, x));
 }

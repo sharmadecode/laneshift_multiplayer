@@ -54,9 +54,9 @@ interface PresetCfg {
 }
 
 const PRESETS: Record<Preset, PresetCfg> = {
-  low: { pixelRatio: 1, shadows: false, density: 0.55, bloom: false, far: 900, fog: 0.0045, buildings: 18, lamps: 18 },
-  medium: { pixelRatio: Math.min(window.devicePixelRatio, 1.5), shadows: false, density: 0.8, bloom: true, far: 1300, fog: 0.0032, buildings: 30, lamps: 25 },
-  high: { pixelRatio: Math.min(window.devicePixelRatio, 2), shadows: true, density: 1.0, bloom: true, far: 1600, fog: 0.0028, buildings: 46, lamps: 25 }
+  low: { pixelRatio: 1, shadows: false, density: 0.55, bloom: false, far: 900, fog: 0.0032, buildings: 18, lamps: 18 },
+  medium: { pixelRatio: Math.min(window.devicePixelRatio, 1.5), shadows: true, density: 0.8, bloom: true, far: 1300, fog: 0.0024, buildings: 30, lamps: 25 },
+  high: { pixelRatio: Math.min(window.devicePixelRatio, 2), shadows: true, density: 1.0, bloom: true, far: 1600, fog: 0.0019, buildings: 46, lamps: 25 }
 };
 
 interface Burst {
@@ -390,7 +390,7 @@ export class Game {
       if (s.crashed) this.hud.updateCrashTimer(s.crashTimer);
       this.audio.setSpeed(r.speed);
 
-      this.road.update(r.speed * dt);
+      this.road.update(r.speed * dt, r.x, r.distance);
       this.traffic.sync(this.renderTraffic(), r.distance);
       this.syncRemotes();
       this.player.syncVisuals(dt, r);
@@ -413,7 +413,7 @@ export class Game {
     if (s.crashed) this.hud.updateCrashTimer(s.crashTimer);
     this.audio.setSpeed(s.speed);
 
-    this.road.update(s.speed * dt);
+    this.road.update(s.speed * dt, s.x, s.distance);
     this.traffic.sync(this.spawner.cars, s.distance);
     this.player.syncVisuals(dt);
     this.updateBursts(dt);
@@ -469,6 +469,11 @@ export class Game {
         this.online = false;
         this.hud.setNet('OFFLINE', false);
         this.hud.setReconnecting(false);
+        // Tear down the stale socket before entering the menu so a fresh Net
+        // is created; otherwise the old socket keeps the server subscription
+        // alive and the player can never get back online.
+        this.net?.disconnect();
+        this.net = null;
         this.enterMenu();
       }
     });
@@ -714,13 +719,14 @@ export class Game {
     this.density = cfg.density;
     this.renderer.setPixelRatio(cfg.pixelRatio);
     this.renderer.shadowMap.enabled = cfg.shadows;
-    this.road.setShadows(cfg.shadows);
+    this.road.setShadows(cfg.shadows, preset === 'high' ? 2048 : 1024);
     this.spawner.reset(cfg.density);
 
     const fog = this.scene.fog as THREE.FogExp2;
     fog.density = cfg.fog;
     this.player.camera.far = cfg.far;
     this.player.camera.updateProjectionMatrix();
+    this.road.setFar(cfg.far);
 
     if (cfg.bloom && !this.composer) {
       this.composer = new EffectComposer(this.renderer);

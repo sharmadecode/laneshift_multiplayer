@@ -19,7 +19,8 @@ export function createCarMesh(opts: CarMeshOptions): THREE.Group {
     metalness: 0.68,
     roughness: 0.24,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.08
+    clearcoatRoughness: 0.08,
+    envMapIntensity: 0.65
   });
 
   // Dark tinted cabin glass with glossy specular reflections
@@ -28,11 +29,12 @@ export function createCarMesh(opts: CarMeshOptions): THREE.Group {
     metalness: 0.9,
     roughness: 0.05,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.02
+    clearcoatRoughness: 0.02,
+    envMapIntensity: 0.9
   });
 
-  const trimMat = new THREE.MeshStandardMaterial({ color: 0x1e222d, roughness: 0.8, metalness: 0.25 });
-  const chromeMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, metalness: 0.95, roughness: 0.12 });
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x1e222d, roughness: 0.8, metalness: 0.25, envMapIntensity: 0.5 });
+  const chromeMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, metalness: 0.95, roughness: 0.12, envMapIntensity: 0.8 });
   const caliperMat = new THREE.MeshStandardMaterial({ color: 0xef4444, metalness: 0.35, roughness: 0.25 });
   const grilleMat = new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.9, metalness: 0.5 });
 
@@ -166,7 +168,7 @@ export function createCarMesh(opts: CarMeshOptions): THREE.Group {
   const brakeGeo = new THREE.CylinderGeometry(tireRadius * 0.62, tireRadius * 0.62, 0.06, 12);
   brakeGeo.rotateZ(Math.PI / 2);
 
-  const wheels: THREE.Mesh[] = [];
+  const wheels: THREE.Object3D[] = [];
 
   const wheelPositions: [number, number][] = [
     [-0.92, -1.42],
@@ -179,14 +181,16 @@ export function createCarMesh(opts: CarMeshOptions): THREE.Group {
     const wGroup = new THREE.Group();
     wGroup.position.set(wx, wheelY, wz);
 
+    const spin = new THREE.Group();
     const tire = new THREE.Mesh(tireGeo, tireMat);
     tire.castShadow = true;
     const rim = new THREE.Mesh(rimGeo, rimMat);
     const hub = new THREE.Mesh(hubGeo, chromeMat);
 
-    wGroup.add(tire, rim, hub);
+    spin.add(tire, rim, hub);
+    wGroup.add(spin);
     g.add(wGroup);
-    wheels.push(tire);
+    wheels.push(spin);
 
     const brake = new THREE.Mesh(brakeGeo, caliperMat);
     brake.position.set(wx > 0 ? wx - 0.08 : wx + 0.08, wheelY + 0.02, wz);
